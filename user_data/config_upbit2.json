@@ -1,0 +1,80 @@
+
+{
+    "max_open_trades": 3,
+    "stake_currency": "KRW",
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 0.99,
+    "fiat_display_currency": "KRW",
+    "dry_run": true,
+    "dry_run_wallet": 10000,
+    "cancel_open_orders_on_exit": false,
+    "trading_mode": "spot",
+    "margin_mode": "",
+    "unfilledtimeout": {
+        "entry": 10,
+        "exit": 10,
+        "exit_timeout_count": 0,
+        "unit": "minutes"
+    },
+    "entry_pricing": {
+        "price_side": "same",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    "exit_pricing":{
+        "price_side": "same",
+        "use_order_book": true,
+        "order_book_top": 1
+    },
+    "exchange": {
+        "name": "upbit",
+        "key": "",
+        "secret": "",
+        "ccxt_config": {},
+        "ccxt_async_config": {},
+        "pair_whitelist": ["ETH/KRW","XRP/KRW", "BTC/KRW", "SOL/KRW"
+        ],
+        "pair_blacklist": [
+        ],
+        "_ft_has_params": {
+            "ohlcv_candle_limit": 200
+            }
+    },
+    "pairlists": [
+        {
+            "method": "StaticPairList",
+            "number_assets": 20,
+            "sort_key": "quoteVolume",
+            "min_value": 0,
+            "refresh_period": 300
+        }
+    ],
+    "telegram": {
+        "enabled": true,
+        "token": "6076001792:AAEPV8_kB94fXCEv_XgIBNaIwEo1VeGGXJc",
+        "chat_id": "5123261011"
+    },
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": false,
+        "jwt_secret_key": "04e07fea168219cb1f590269d613a2be6d0cc07d43f6eca1619955d0d097cf52",
+        "ws_token": "POK89lIbZMN7x3yi64lM9HPdy4a_qTi77g",
+        "CORS_origins": [],
+        "username": "freqtrader",
+        "password": "027941"
+    },
+    "bot_name": "freqtrade",
+    "initial_state": "running",
+    "force_entry_enable": true,
+    "internals": {
+        "process_throttle_secs": 5
+    }
+}

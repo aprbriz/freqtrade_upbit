@@ -1,0 +1,161 @@
+import asyncio
+import logging
+import csv
+import os
+import signal
+from datetime import datetime
+
+# CCXT Pro의 바이낸스 웹소켓 전용 모듈 사용 (freqtrade 방식 준수)
+from ccxt.pro import binance as ccxt_binance
+# Freqtrade의 캔들 타입 Enum을 임시로 정의 (실제 Freqtrade 환경에서는 import하여 사용)
+class CandleType:
+    SPOT = "spot"
+
+# 로깅 설정 (기존 코드 유지)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("ExchangeWS-Collector")
+
+class ExchangeWS:
+    """
+    Freqtrade의 ExchangeWS 구조를 참고하여 바이낸스 웹소켓 데이터 수집
+    """
+    def __init__(self, symbols: list):
+        self.symbols = symbols
+        self.timeframe = '1m'
+        self._background_tasks: set[asyncio.Task] = set()
+        self._running = True
+        self._ccxt_object = None
+        # Freqtrade의 내부 상태 변수 초기화 (테스트 코드에서 사용된 부분)
+        self.klines_last_refresh = {}
+        self.klines_last_request = {}
+
+    def _init_ccxt(self):
+        """
+        CCXT 객체 초기화 (freqtrade exchange_ws.py의 설정 참고)
+        """
+        # Freqtrade는 config dict를 넘겨주지만, 여기서는 하드코딩
+        return ccxt_binance({
+            'enableRateLimit': True,
+            'options': {
+                # 테스트 코드의 CandleType.SPOT과 연계
+                'defaultType': 'spot', 
+                'ws': {'heartbeat': 30000}
+            }
+        })
+
+    async def _pair_worker(self, symbol: str):
+        """
+        각 심볼별 웹소켓 연결 및 데이터 처리 루프
+        """
+        # CSV 파일 설정
+        file_path = os.path.join(os.getcwd(), f"{symbol.replace('/', '_')}_ohlcv.csv")
+        if not os.path.exists(file_path):
+            with open(file_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['data_time', 'save_time', 'open', 'high', 'low', 'close', 'volume'])
+        
+        # 중복 저장 방지를 위한 마지막 타임스탬프 (요청하신 초기 코드의 개선 아이디어 반영)
+        last_ts = None
+
+        while self._running:
+            try:
+                # Freqtrade는 watch_ohlcv를 호출하여 데이터를 받음
+                ohlcv = await asyncio.wait_for(
+                    self._ccxt_object.watch_ohlcv(symbol, self.timeframe), 
+                    timeout=45.0 # 바이낸스 응답 지연 고려
+                )
+
+                if ohlcv and len(ohlcv) > 0:
+                    # candle 구조: [timestamp, open, high, low, close, volume]
+                    candle = ohlcv[-1]
+                    ts, o, h, l, c, v = candle
+                    
+                   # if last_ts is not None and ts <= last_ts:
+                    #    continue # 이미 처리한 캔들이면 스킵
+                        
+                    data_time = datetime.fromtimestamp(ts / 1000).strftime('%Y/%m/%d %H:%M:%S')
+                    save_time = datetime.now().strftime('%Y/%m/%d %H:%M:%S')
+                    row = [data_time, save_time, o, h, l, c, v]
+
+                    with open(file_path, 'a', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(row)
+                        f.flush()
+                    
+                    last_ts = ts
+                    
+                    # Freqtrade의 내부 상태 업데이트 (get_ohlcv 테스트 함수에서 사용됨)
+                    self.klines_last_refresh[(symbol, self.timeframe, CandleType.SPOT)] = ts
+
+
+            except asyncio.TimeoutError:
+                logger.warning(f"[{symbol}] 타임아웃 발생 - 재연결 시도")
+                continue
+            except asyncio.CancelledError:
+                logger.info(f"[{symbol}] 작업 취소됨 (종료 중)")
+                break
+            except Exception as e:
+                logger.error(f"[{symbol}] 루프 에러: {e}")
+                # Freqtrade는 에러 시 일정 시간 슬립 후 재시도
+                await asyncio.sleep(5)
+
+    async def run(self):
+        """메인 실행 함수"""
+        self._ccxt_object = self._init_ccxt()
+        for symbol in self.symbols:
+            task = asyncio.create_task(self._pair_worker(symbol))
+            self._background_tasks.add(task)
+        
+        # Freqtrade 테스트 코드의 _start_forever와 유사한 역할 수행
+        # return_exceptions=True로 설정하여 하나의 태스크 실패가 전체 중단 방지
+        await asyncio.gather(*self._background_tasks, return_exceptions=True)
+
+    async def cleanup(self):
+        """
+        자원 해제 및 세션 종료 (테스트 코드의 cleanup 함수 로직)
+        """
+        self._running = False
+        logger.info("모든 자원을 해제하고 종료합니다...")
+
+        for task in self._background_tasks:
+            task.cancel() # 태스크 취소 요청
+
+        if self._ccxt_object:
+            # Freqtrade의 ccxt_object.close()는 AsyncMock으로 처리됨
+            # 실제 CCXT 객체의 close는 비동기로 호출되어야 함 (Unclosed client session 방지)
+            await self._ccxt_object.close() 
+            logger.info("CCXT 세션이 안전하게 닫혔습니다.")
+
+async def main():
+    """
+    프로그램 진입점 및 시그널 핸들러 설정
+    (요청하신 초기 코드의 main 로직)
+    """
+    symbols = ['BTC/USDT', 'ETH/USDT', 'XRP/USDT'] # SPOT 데이터
+    collector = ExchangeWS(symbols)
+    loop = asyncio.get_running_loop()
+    
+    # 시그널 핸들링 (Ctrl+C, SIGTERM 처리)
+    stop_event = asyncio.Event()
+    def handle_exit():
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, handle_exit)
+
+    # 실행 및 종료 대기
+    main_task = asyncio.create_task(collector.run())
+    await stop_event.wait()
+    
+    # 종료 절차 수행
+    await collector.cleanup()
+    main_task.cancel()
+    logger.info("프로그램이 완전히 종료되었습니다.")
+
+if __name__ == "__main__":
+    try:
+        # Freqtrade 테스트 코드처럼 asyncio.run 실행
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
+

@@ -1,0 +1,9 @@
+user_data/data/*
+user_data/backtest_results/*
+user_data/logs/*
+user_data/plots/*
+*.pyc
+__pycache__/
+.env
+.idea/
+.vscode/
