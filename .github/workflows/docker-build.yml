@@ -1,0 +1,39 @@
+name: Docker Build and Push (Freqtrade Upbit)
+
+on:
+  push:
+    branches: [ "main" ]  # main 브랜치에 push될 때마다 실행
+
+env:
+  REGISTRY: ghcr.io
+  # GitHub 저장소 이름이 freqtrade_upbit라고 가정합니다.
+  # 만약 저장소 이름이 다르면 아래 이름을 직접 수정해도 됩니다.
+  IMAGE_NAME: aprbriz/freqtrade_upbit 
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }} # 자동으로 aprbriz가 들어갑니다.
+          password: ${{ secrets.GITHUB_TOKEN }} # 보안 토큰 자동 사용
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/aprbriz/freqtrade_upbit:latest
+            ghcr.io/aprbriz/freqtrade_upbit:${{ github.sha }}
+
