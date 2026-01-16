@@ -24,6 +24,7 @@ services:
       - ./user_data:/freqtrade/user_data
       - ./1bil:/freqtrade/1bil
       - ./1bil_tests:/freqtrade/tests  # 로컬 소스를 컨테이너 내부로 연결
+      - ./1bil_exchange:/freqtrade/freqtrade/exchange  # 로컬 소스를 컨테이너 내부로 연
 
     # Expose api on port 8080 (localhost only)
     # Please read the https://www.freqtrade.io/en/stable/rest-api/ documentation
