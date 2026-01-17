@@ -3,7 +3,7 @@
         "$schema": "https://schema.freqtrade.io/schema.json",
         "max_open_trades": 3,
         "stake_currency": "USDT",
-        "stake_amount": 100001,
+        "stake_amount": 1000001,
         "tradable_balance_ratio": 0.99,
         "fiat_display_currency": "USD",
         "dry_run": true,
@@ -49,9 +49,8 @@
                 "rateLimit": 50
             }
         },
-        "internals": {
-            "process_throttle_secs": 1
-        },
+        "process_throttle_secs": 0.5
+        ,
 
     "pairlists": [
         {
@@ -81,5 +80,8 @@
     },
     "bot_name": "freqtrade",
     "initial_state": "running",
-    "force_entry_enable": false
+    "force_entry_enable": false,
+    "internals": {
+        "process_throttle_secs": 5
+    }
 }
