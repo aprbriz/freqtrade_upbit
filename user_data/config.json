@@ -1,11 +1,10 @@
-
     {
-        "$schema": "https://schema.freqtrade.io/schema.json",
+        "$schema": "https://schema.freqtrade.io",
         "max_open_trades": 3,
-        "stake_currency": "USDT",
+        "stake_currency": "KRW",
         "stake_amount": 100001,
         "tradable_balance_ratio": 0.99,
-        "fiat_display_currency": "USD",
+        "fiat_display_currency": "KRW",
         "dry_run": true,
         "dry_run_wallet": 1000002,
         "cancel_open_orders_on_exit": false,
@@ -32,12 +31,16 @@
             "use_order_book": true,
             "order_book_top": 1
         },
-            
+
         "exchange": {
-            "name": "binance",
-            "enable_ws": true,
-            "pair_whitelist": ["BTC/USDT", "ETH/USDT", "XRP/USDT"],
-            "pair_blacklist": [".*UP/USDT", ".*DOWN/USDT", ".*BEAR/USDT", ".*BULL/USDT"],
+            "name": "upbit",
+            "key": "YOUR_UPBIT_ACCESS_KEY",
+            "secret": "YOUR_UPBIT_SECRET_KEY",
+            "enable_ws": false,
+            "pair_whitelist": ["BTC/KRW", "ETH/KRW", "XRP/KRW"],
+            "pair_blacklist": [
+                "BTT/KRW"
+            ],
             "ccxt_config": {
                 "enableRateLimit": true,
                 "options": {
@@ -79,7 +82,8 @@
         "username": "opc",
         "password": "1111"
     },
-    "bot_name": "freqtrade",
+    "bot_name": "freqtrade_upbit",
     "initial_state": "running",
     "force_entry_enable": false
 }
+
