@@ -1,0 +1,131 @@
+아래의 두 소스를 개선해주고, 개선된 부분에 한글로 주석을 넣어주라. 개선한 이유 등
+
+# user_data/realtime/upbit_ohlcv_1s.py
+
+import json
+import websocket
+import time
+from collections import defaultdict
+
+
+UPBIT_WS_URL = "wss://api.upbit.com/websocket/v1"
+
+PAIRS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
+
+MAX_LATE_SECONDS = 2
+
+
+class OHLCV1sAggregator:
+    def __init__(self):
+        self.data = defaultdict(dict)  # symbol -> sec -> ohlcv
+
+    def update(self, symbol, price, volume, ts_ms):
+        sec = ts_ms // 1000
+
+        ohlcv = self.data[symbol].get(sec)
+
+        if ohlcv is None:
+            self.data[symbol][sec] = {
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "volume": volume,
+            }
+        else:
+            ohlcv["high"] = max(ohlcv["high"], price)
+            ohlcv["low"] = min(ohlcv["low"], price)
+            ohlcv["close"] = price
+            ohlcv["volume"] += volume
+
+    def flush_old(self, now_sec):
+        for symbol in list(self.data.keys()):
+            for sec in list(self.data[symbol].keys()):
+                if sec < now_sec - MAX_LATE_SECONDS:
+                    candle = self.data[symbol].pop(sec)
+                    self.on_candle(symbol, sec, candle)
+
+    def on_candle(self, symbol, sec, candle):
+        print(f"[1s] {symbol} {sec} {candle}")
+
+
+agg = OHLCV1sAggregator()
+
+
+def on_message(ws, message):
+    data = json.loads(message)
+
+    symbol = data["code"]
+    price = data["trade_price"]
+    volume = data["trade_volume"]
+    ts_ms = data["trade_timestamp"]
+
+    agg.update(symbol, price, volume, ts_ms)
+
+    now_sec = int(time.time())
+    agg.flush_old(now_sec)
+
+
+def on_open(ws):
+    ws.send(json.dumps([
+        {"ticket": "freqtrade-ohlcv"},
+        {
+            "type": "trade",
+            "codes": PAIRS,
+            "isOnlyRealtime": True
+        }
+    ]))
+
+
+def run():
+    ws = websocket.WebSocketApp(
+        UPBIT_WS_URL,
+        on_message=on_message,
+        on_open=on_open,
+    )
+    ws.run_forever(ping_interval=60, ping_timeout=10)
+
+
+if __name__ == "__main__":
+    run()
+
+================================================================================
+user_data/realtime/ohlcv_writer.py
+
+import sqlite3
+import os
+
+DB_PATH = "user_data/data/ohlcv_1s.sqlite"
+
+
+class OHLCVWriter:
+    def __init__(self):
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        self._init_table()
+
+    def _init_table(self):
+        self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS ohlcv_1s (
+            symbol TEXT,
+            ts INTEGER,
+            open REAL,
+            high REAL,
+            low REAL,
+            close REAL,
+            volume REAL,
+            PRIMARY KEY (symbol, ts)
+        )
+        """)
+        self.conn.commit()
+
+    def write(self, symbol, ts, c):
+        self.conn.execute("""
+        INSERT OR REPLACE INTO ohlcv_1s
+        (symbol, ts, open, high, low, close, volume)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            symbol, ts,
+            c["open"], c["high"], c["low"], c["close"], c["volume"]
+        ))
+        self.conn.commit()

@@ -1,0 +1,89 @@
+    {
+        "$schema": "https://schema.freqtrade.io",
+        "max_open_trades": 3,
+        "stake_currency": "KRW",
+        "stake_amount": 49999,
+        "tradable_balance_ratio": 0.99,
+        "fiat_display_currency": "KRW",
+        "dry_run": true,
+        "dry_run_wallet": 200000,
+        "cancel_open_orders_on_exit": false,
+        "trading_mode": "spot",
+        "margin_mode": "",
+        "unfilledtimeout": {
+            "entry": 10,
+            "exit": 10,
+            "exit_timeout_count": 0,
+            "unit": "minutes"
+        },
+        "entry_pricing": {
+            "price_side": "same",
+            "use_order_book": true,
+            "order_book_top": 1,
+            "price_last_balance": 0.0,
+            "check_depth_of_market": {
+                "enabled": false,
+                "bids_to_ask_delta": 1
+            }
+        },
+        "exit_pricing": {
+            "price_side": "same",
+            "use_order_book": true,
+            "order_book_top": 1
+        },
+
+        "exchange": {
+            "name": "upbit",
+            "key": "YOUR_UPBIT_ACCESS_KEY",
+            "secret": "YOUR_UPBIT_SECRET_KEY",
+            "enable_ws": false,
+            "pair_whitelist": ["BTC/KRW", "ETH/KRW", "XRP/KRW"],
+            "pair_blacklist": [
+                "BTT/KRW"
+            ],
+            "ccxt_config": {
+                "enableRateLimit": true,
+                "options": {
+                    "defaultType": "spot"
+                }
+            },
+            "ccxt_async_config": {
+                "enableRateLimit": true,
+                "rateLimit": 50
+            }
+        },
+        "internals": {
+            "process_throttle_secs": 1
+        },
+
+    "pairlists": [
+        {
+            "method": "VolumePairList",
+            "number_assets": 20,
+            "sort_key": "quoteVolume",
+            "min_value": 0,
+            "refresh_period": 1800
+        }
+    ],
+    "telegram": {
+        "enabled": false,
+        "token": "",
+        "chat_id": ""
+    },
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": false,
+        "jwt_secret_key": "97e57fb4cf418b9614dae83a48e5b39f29716d2ad3ed5c1c1410c35b2844a69a",
+        "ws_token": "BxfnN_ySw6Q5zF36lhJTmEuG_BH-9G4LHA",
+        "CORS_origins": [],
+        "username": "opc",
+        "password": "1111"
+    },
+    "bot_name": "freqtrade_upbit",
+    "initial_state": "running",
+    "force_entry_enable": false
+}
+
