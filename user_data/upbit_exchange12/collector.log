@@ -1,6 +1,0 @@
-2026-01-26 06:29:50,374 - ohlcv-writer - INFO - OHLCVWriter 종료 중...
-2026-01-26 06:29:50,375 - ohlcv-writer - INFO - DB 연결 종료 완료
-2026-01-26 06:54:04,991 - ohlcv-writer - INFO - DB 초기화 완료: /freqtrade/user_data/upbit_exchange/ohlcv.sqlite
-2026-01-26 06:54:04,992 - collector - INFO - 수집기 시작됨. 종료하려면 Ctrl+C를 누르세요.
-2026-01-26 06:54:05,056 - websocket - INFO - Websocket connected
-2026-01-26 06:54:05,057 - collector - INFO - WebSocket connected
