@@ -1,10 +1,10 @@
-user_data/data/*
-user_data/backtest_results/*
-user_data/logs/*
-user_data/plots/*
-user_data/upbit_exchange_backup/*
-user_data/upbit_exchange_meme/*
-1bil/*
+user_data/data/
+user_data/backtest_results/
+user_data/logs/
+user_data/plots/
+user_data/upbit_exchange_backup/
+user_data/upbit_exchange_memo/
+1bil/
 *.pyc
 __pycache__/
 .env
