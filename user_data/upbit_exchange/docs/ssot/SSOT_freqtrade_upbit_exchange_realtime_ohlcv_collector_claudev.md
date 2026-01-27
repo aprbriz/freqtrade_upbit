@@ -1,8 +1,8 @@
 업비트 실시간 OHLCV 수집기 - SSOT (Single Source of Truth)
 프로젝트: Freqtrade_upbit Real-time OHLCV Collector
-버전: v1.3
+버전: v1.4
 생성일: 2026-01-26
-최종 업데이트: 2026-01-27 (v1.3 CRITICAL-001 해결)
+최종 업데이트: 2026-01-27 (v1.4 Phase 2 구현 명세 추가)
 
 ✅ 긴급 수정 완료 (v1.2 → v1.3)
 CRITICAL-001: WebSocket 19시간 후 재연결 실패 - **해결됨** (2026-01-27)
@@ -44,17 +44,63 @@ websocket-client
 SQLite3
 threading
 
-현재 DB 구조
+현재 DB 구조 (Phase 1)
 파일: ohlcv.sqlite (단일 파일)
 테이블명: ohlcv_{QUOTE}_{BASE}
   - ts (INTEGER, PRIMARY KEY): 밀리초 timestamp
   - open, high, low, close, volume (REAL)
   - timeframe_ms (INTEGER): 500, 1000, -3
 
+Phase 2 목표 DB 구조 (구현 예정)
+파일 분리:
+  - ohlcv_short.sqlite: 0.5초봉, 1초봉, 3틱봉
+  - ohlcv_10s_1m.sqlite: 10초봉, 1분봉
+  - ohlcv_10m.sqlite: 10분봉
+
 알려진 이슈 (Known Issues)
 
 ✅ 19시간 후 재연결 실패 (CRITICAL-001) - 해결됨 (v1.3)
 ✅ XRP 추가는 정상 작동 확인됨
+🔍 ISSUE-002: 동일 ts 중복 쓰기 경고 - 원인 조사 중
+
+ISSUE-002: 동일 타임스탬프 중복 쓰기 경고
+발견 날짜: 2026-01-28
+증상:
+```
+ts 역전 감지: last=1769536080338, now=1769536080338
+```
+- last와 now가 **동일한 값** (역전이 아님)
+- 약 1분 간격으로 발생
+- BTC, XRP 등 여러 pair에서 발생
+
+영향도: 🟢 낮음 (UPSERT로 데이터 손실 없음)
+우선순위: 🟡 P2 (기능 영향 없으나 원인 파악 필요)
+
+디버깅 작업 지시 (DEBUG-002):
+수정 파일: ohlcv_writer.py
+수정 위치: _check_ts_order() 또는 _log_order() 메서드
+수정 내용:
+1. 동일 ts 감지 시 **호출 스택(traceback)** 출력 추가
+2. 해당 봉의 pair, timeframe_ms, candle 내용 로깅
+3. 예시 코드:
+```python
+import traceback
+def _log_order(self, message: str):
+    now = time.time()
+    if now - self.last_order_log_ts >= self.invalid_log_interval:
+        logger.warning(message)
+        logger.warning(f"호출 스택:\n{''.join(traceback.format_stack())}")
+        self.last_order_log_ts = now
+```
+
+예상 원인 후보:
+1. flush_old()에서 pop() 후 같은 봉이 다시 생성되는 경로
+2. _periodic_flush()와 aggregator.update() 사이 경쟁 조건
+3. _check_ts_order 조건이 너무 엄격 (< 대신 <= 사용)
+
+완료 기준:
+- 호출 스택 로그로 중복 write 발생 경로 확인
+- 근본 원인 파악 후 SSOT에 결과 기록
 
 
 🔒 불변 규칙 (IMMUTABLE RULES)
@@ -181,15 +227,16 @@ Phase 1: 핵심 기능 (완료 ✅)
 [x] freqtrade Strategy 연동: ../strategies/UpbitMicroStructureStrategy.py
 [x] XRP 페어 추가 (정상 작동 확인)
 
-Phase 2: 단기 개선 (완료 ✅)
+Phase 2: 다중 DB + 다중 Collector (구현 예정) 🚧
 
-[x] 1초봉 → 5초/10초/33초/57초/1분 합성 로직 (메모리에서만 처리)
-[x] 10초봉, 1분봉, 10분봉용 별도 WebSocket 연결 및 DB 파일 생성
-[x] 통계 정보 출력 (실시간 모니터링)
-[x] 설정 파일 분리 (config_upbit_exchange.yml)
-[x] CLI 인자 지원 (pairs, timeframes)
-[x] 헬스체크 엔드포인트 (simple HTTP)
-[x] 데이터 정합성 검증 로직
+[ ] P2-001: 다중 Collector 구조 구현 (short/mid/long)
+[ ] P2-002: DB 파일 분리 (ohlcv_short.sqlite, ohlcv_10s_1m.sqlite, ohlcv_10m.sqlite)
+[ ] P2-003: 1초봉 → 5초/10초/33초/57초/1분 합성 로직 (메모리에서만 처리)
+[ ] P2-004: 설정 파일 연동 (config_upbit_exchange.yml 로딩)
+[ ] P2-005: CLI 인자 지원 (--pairs, --timeframes, --disable-phase2)
+[ ] P2-006: 통계 정보 출력 (실시간 모니터링)
+[ ] P2-007: 헬스체크 엔드포인트 (/health, /stats)
+[ ] P2-008: 데이터 정합성 검증 로직
 
 Phase 3: 장기 확장 (백로그)
 
@@ -222,7 +269,7 @@ RISK-005: Ctrl+C 종료 지연
 RISK-006: 여러 WebSocket의 동시 DB 쓰기
 설명: 10초봉, 1분봉, 10분봉용 별도 WebSocket이 같은 DB 파일에 쓰기 시 충돌 가능
 완화: 타임프레임별 별도 DB 파일 사용 (DEC-008 참조)
-상태: 🟡 설계 완료 (구현 예정)
+상태: 🟡 설계 완료 (Phase 2 구현 대기)
 RISK-007: 업비트 서버 측 강제 연결 종료
 <!-- 신규 추가: CRITICAL-001 관련 -->
 설명: 업비트 서버가 19시간 후 연결 강제 종료 (opcode=8, b'\x83\xe8')
@@ -341,6 +388,85 @@ DEC-009(9시간 주기적 정상 재연결)과 결합 시 장애/정상 재연�
 상태: ✅ 확정
 
 
+🚧 PHASE 2 구현 명세 (다중 DB + 다중 Collector)
+
+목표
+- 타임프레임별 DB 파일 분리로 동시 쓰기 충돌 방지
+- 독립적인 Collector로 장애 격리
+- 합성 봉(메모리 전용)과 직접 수집 봉 분리
+
+아키텍처
+
+```
+main()
+  └─ CollectorManager
+       ├─ ShortCollector (ohlcv_short.sqlite)
+       │    ├─ WebSocket → 체결 데이터
+       │    ├─ TimeframeAggregator(500ms, 1000ms)
+       │    ├─ TickAggregator(3tick)
+       │    └─ DerivedAggregator(5s,10s,33s,57s,1m) ← 메모리 전용
+       │
+       ├─ MidCollector (ohlcv_10s_1m.sqlite)
+       │    ├─ WebSocket → 체결 데이터
+       │    └─ TimeframeAggregator(10000ms, 60000ms)
+       │
+       └─ LongCollector (ohlcv_10m.sqlite)
+            ├─ WebSocket → 체결 데이터
+            └─ TimeframeAggregator(600000ms)
+```
+
+Collector 구성
+
+| Collector | DB 파일 | 타임프레임 | 틱봉 | 합성봉 |
+|-----------|---------|------------|------|--------|
+| short | ohlcv_short.sqlite | 500ms, 1000ms | 3틱 | 5s,10s,33s,57s,1m (메모리) |
+| mid | ohlcv_10s_1m.sqlite | 10s, 1m | 없음 | 없음 |
+| long | ohlcv_10m.sqlite | 10m | 없음 | 없음 |
+
+구현 요구사항
+
+P2-001: 다중 Collector 구조
+- CollectorConfig 클래스: name, pairs, timeframes_ms, tick_sizes, db_path, derived_timeframes_ms
+- CollectorManager 클래스: collectors 리스트 관리, 시작/종료/헬스체크
+- 각 Collector는 독립 스레드에서 실행
+
+P2-002: DB 파일 분리
+- OHLCVWriter에 db_path 파라미터 전달
+- ohlcv.sqlite(기존) → ohlcv_short.sqlite로 마이그레이션 또는 병행 사용
+
+P2-003: 합성 봉 (DerivedTimeframeAggregator)
+- 1초봉 flush 시 합성 봉 업데이트
+- 메모리에만 보관 (max_store_per_pair=1000)
+- DB 저장 안 함
+
+P2-004: 설정 파일 연동
+- config_upbit_exchange.yml 로딩 (PyYAML)
+- 없으면 기본값 사용, yaml 모듈 없으면 경고 후 기본값
+
+P2-005: CLI 인자
+- --pairs KRW-BTC,KRW-ETH,KRW-XRP
+- --disable-phase2 (short collector만 실행)
+- --http-port 8000
+
+P2-006: 통계 출력
+- 주기적 로그 출력 (30초 간격)
+- updates, flushes, invalid_trades, last_message_age
+
+P2-007: 헬스체크 HTTP
+- GET /health → 각 collector 상태
+- GET /stats → 각 collector 통계
+
+P2-008: 데이터 정합성
+- price <= 0, volume < 0 필터링
+- 타임스탬프 역전 감지 및 경고
+
+제약 조건
+
+- IR-002 파일 범위 내에서만 구현 (새 파일 추가 시 승인 필요)
+- DEC-009(9시간 주기 재연결), DEC-010(시간 기반 재연결 제한) 유지
+- 기존 Phase 1 기능 정상 동작 보장 (--disable-phase2 옵션)
+
+
 📦 BACKLOG (향후 작업)
 긴급 (완료됨) ✅
 
@@ -371,6 +497,13 @@ BL-012: 실시간 알림 (Telegram, Slack)
 
 
 🔄 UPDATE HISTORY (변경 이력)
+v1.4 - 2026-01-27 (Phase 2 구현 명세 추가)
+
+Phase 2 체크리스트를 "미구현" 상태로 정정
+Phase 2 구현 명세 섹션 신규 추가 (아키텍처, Collector 구성, 요구사항)
+현재 DB 구조 vs Phase 2 목표 DB 구조 명확화
+RISK-006 상태 업데이트 (Phase 2 구현 대기)
+
 v1.3 - 2026-01-27 (CRITICAL-001 해결) ✅
 
 CRITICAL-001 해결: WebSocket 재연결 로직 강화 완료
@@ -438,11 +571,15 @@ v1.0 - 2026-01-26
 Python 3.8+
 Docker 환경 권장
 로그 디렉토리: ./logs/
-DB 파일:
+DB 파일 (현재 - Phase 1):
+
+./ohlcv.sqlite (0.5초, 1초, 3틱 - 단일 파일)
+
+DB 파일 (Phase 2 구현 후):
 
 ./ohlcv_short.sqlite (0.5초, 1초, 3틱)
-./ohlcv_10s_1m.sqlite (10초, 1분) - 향후 추가
-./ohlcv_10m.sqlite (10분) - 향후 추가
+./ohlcv_10s_1m.sqlite (10초, 1분)
+./ohlcv_10m.sqlite (10분)
 
 
 
@@ -463,5 +600,5 @@ Ctrl+C  # 5초 이내 안전 종료
 수동 재시작 불필요
 
 
-마지막 업데이트: 2026-01-27 (v1.3 CRITICAL-001 해결)
-다음 리뷰 예정: 24시간 연속 테스트 완료 후
+마지막 업데이트: 2026-01-27 (v1.4 Phase 2 구현 명세 추가)
+다음 리뷰 예정: Phase 2 구현 완료 후
