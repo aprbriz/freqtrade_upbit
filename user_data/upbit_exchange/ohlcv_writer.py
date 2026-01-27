@@ -38,6 +38,16 @@ class OHLCVWriter:
         # 이유: 매번 연결/해제하면 느림
         self.conn = None
         
+        # [개선3-2] 데이터 정합성 통계
+        self.stats = {
+            'invalid_writes': 0,
+            'out_of_order_writes': 0,
+        }
+        self.last_ts = {}
+        self.invalid_log_interval = 60.0
+        self.last_invalid_log_ts = 0.0
+        self.last_order_log_ts = 0.0
+        
         # DB 초기화
         self._init_db()
     
@@ -134,9 +144,12 @@ class OHLCVWriter:
         [개선11] 배치 처리 및 에러 처리 강화
         """
         try:
+            if not self._validate_candle(pair, ts, timeframe_ms, candle):
+                return
             table = self._table_name(pair)
             
             with self.lock:
+                self._check_ts_order(table, timeframe_ms, ts)
                 # 테이블 생성 (캐싱으로 빠름)
                 self._create_table_if_not_exists(table)
                 
@@ -180,6 +193,57 @@ class OHLCVWriter:
             logger.error(f"데이터 저장 에러 [{pair}@{ts}]: {e}")
         except Exception as e:
             logger.error(f"예상치 못한 에러 [{pair}@{ts}]: {e}")
+
+    def _validate_candle(self, pair: str, ts: int, timeframe_ms: int, candle: dict) -> bool:
+        """
+        데이터 정합성 검증
+        """
+        try:
+            if ts is None or ts <= 0:
+                self._log_invalid(f"[{pair}] 잘못된 ts: {ts}")
+                return False
+            if timeframe_ms is None or not isinstance(timeframe_ms, int):
+                self._log_invalid(f"[{pair}] 잘못된 timeframe_ms: {timeframe_ms}")
+                return False
+            required_keys = ("open", "high", "low", "close", "volume")
+            for key in required_keys:
+                if key not in candle:
+                    self._log_invalid(f"[{pair}] candle 누락 키: {key}")
+                    return False
+            if candle["open"] <= 0 or candle["high"] <= 0 or candle["low"] <= 0 or candle["close"] <= 0:
+                self._log_invalid(f"[{pair}] 잘못된 가격: {candle}")
+                return False
+            if candle["volume"] < 0:
+                self._log_invalid(f"[{pair}] 잘못된 볼륨: {candle}")
+                return False
+            return True
+        except Exception as e:
+            self._log_invalid(f"[{pair}] 검증 실패: {e}")
+            return False
+
+    def _check_ts_order(self, table: str, timeframe_ms: int, ts: int):
+        """
+        타임스탬프 순서 검증 (경고만)
+        """
+        key = f"{table}:{timeframe_ms}"
+        last_ts = self.last_ts.get(key)
+        if last_ts is not None and ts <= last_ts:
+            self.stats['out_of_order_writes'] += 1
+            self._log_order(f"[{table}] ts 역전 감지: last={last_ts}, now={ts}")
+        self.last_ts[key] = max(ts, last_ts or ts)
+
+    def _log_invalid(self, message: str):
+        self.stats['invalid_writes'] += 1
+        now = time.time()
+        if now - self.last_invalid_log_ts >= self.invalid_log_interval:
+            logger.warning(message)
+            self.last_invalid_log_ts = now
+
+    def _log_order(self, message: str):
+        now = time.time()
+        if now - self.last_order_log_ts >= self.invalid_log_interval:
+            logger.warning(message)
+            self.last_order_log_ts = now
     
     def commit(self):
         """
@@ -252,6 +316,12 @@ class OHLCVWriter:
                 
         except Exception as e:
             logger.error(f"종료 에러: {e}")
+
+    def get_stats(self) -> dict:
+        """
+        통계 조회
+        """
+        return self.stats.copy()
     
     def __enter__(self):
         """

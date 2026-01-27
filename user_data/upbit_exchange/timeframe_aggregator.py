@@ -74,13 +74,14 @@ class TimeframeAggregator:
         except Exception as e:
             logger.error(f"[{pair}] TimeframeAggregator 업데이트 에러 ({self.timeframe_ms}ms): {e}")
     
-    def flush_old(self, now_ms: int, max_late_ms: int):
+    def flush_old(self, now_ms: int, max_late_ms: int, return_candles: bool = False):
         """
         오래된 봉을 DB에 저장
         
         [개선5] 에러 처리 및 반환값 추가
         """
         flushed = 0
+        flushed_candles = [] if return_candles else None
         
         try:
             with self.lock:
@@ -88,7 +89,7 @@ class TimeframeAggregator:
                     for bucket_ts in list(self.data[pair].keys()):
                         # [개선6] 조건 검사 명확화
                         # 이유: max_late_ms보다 오래된 봉만 저장
-                        if bucket_ts < now_ms - max_late_ms:
+                        if bucket_ts + self.timeframe_ms <= now_ms - max_late_ms:
                             candle = self.data[pair].pop(bucket_ts)
                             
                             try:
@@ -102,6 +103,9 @@ class TimeframeAggregator:
                                 
                                 # [개선7] 통계 업데이트
                                 self.stats['total_candles'] += 1
+                                
+                                if return_candles:
+                                    flushed_candles.append((pair, bucket_ts, candle.copy()))
                                 
                                 logger.debug(
                                     f"[{pair}] {self.timeframe_ms}ms 봉 저장: "
@@ -121,6 +125,8 @@ class TimeframeAggregator:
         except Exception as e:
             logger.error(f"TimeframeAggregator flush_old 에러 ({self.timeframe_ms}ms): {e}")
         
+        if return_candles:
+            return flushed_candles
         return flushed
     
     def get_stats(self) -> dict:

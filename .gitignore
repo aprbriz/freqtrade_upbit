@@ -1,15 +1,63 @@
+######################################
+# Freqtrade 기본 런타임 산출물
+######################################
+
 user_data/data/
 user_data/backtest_results/
 user_data/logs/
 user_data/plots/
+
+######################################
+# upbit_exchange 런타임 / 산출물
+######################################
+
+user_data/upbit_exchange/*.sqlite
+user_data/upbit_exchange/*.sqlite-*
+user_data/upbit_exchange/logs/
+user_data/upbit_exchange/tmp/
+user_data/upbit_exchange/replay/
+user_data/upbit_exchange/backfill/
+
+# 백업 / 메모 디렉토리 (의도적으로 Git 제외)
 user_data/upbit_exchange_backup/
 user_data/upbit_exchange_memo/
+
+######################################
+# 프로젝트별 실험 / 테스트 디렉토리
+######################################
+
 1bil/
+
+######################################
+# Python / IDE / OS 공통
+######################################
+
 *.pyc
 __pycache__/
 .env
 .idea/
 .vscode/
-*.sqlite*
 logs/
 
+######################################
+# SQLite (전역 보호)
+######################################
+
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite*
+
+######################################
+# 🔒 커밋 허용 (Whitelist)
+######################################
+
+# freqtrade 전략은 반드시 커밋
+!user_data/strategies/
+!user_data/strategies/*.py
+
+# upbit_exchange 핵심 코드 & 문서 커밋 허용
+!user_data/upbit_exchange/*.py
+!user_data/upbit_exchange/docs/**
+!user_data/upbit_exchange/README.md
