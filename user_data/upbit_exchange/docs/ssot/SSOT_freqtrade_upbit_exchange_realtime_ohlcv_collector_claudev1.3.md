@@ -380,6 +380,24 @@ CRITICAL-001 해결: WebSocket 재연결 로직 강화 완료
 Phase 0 완료 처리
 모든 관련 경고(⚠️) 해결됨(✅)으로 변경
 
+CHG-CRITICAL-002: flush 타이머 레이스 제거 및 종료 시 flush 콜백 동기화(Timeout 포함)로 종료 안정성 강화.
+
+CHG-CRITICAL-003: on_close에서 ws_close_event set 보장(try/finally)으로 무한 대기 상태 제거.
+
+CHG-OPS-002: 로그 파일 경로를 logs/collector.log로 고정하여 운영 관측성 안정화.
+
+CHG-OPS-003: OHLCVWriter.close()를 idempotent하게 수정하여 종료 경로 예외 방지.
+
+CHG-CRITICAL-002: flush 타이머 레이스 제거(락+플래그) 및 종료 시 flush 콜백 대기(Event+timeout)로 종료 안정성 강화.
+
+CHG-CRITICAL-003: on_close 정리 중 예외가 있어도 ws_close_event.set()이 항상 실행되도록 try/finally 보장.
+
+CHG-OPS-002: 로그 경로를 user_data/upbit_exchange/logs/collector.log로 고정하고 디렉토리 생성 실패 시 폴백+경고 로그 추가.
+
+CHG-OPS-003: OHLCVWriter.close()를 idempotent하게 수정(중복 호출 안전), conn 참조 정리로 종료 예외 방지.
+
+CHG-OPS-004: MultiAggregator derived_last_ts 최소 락 보호, TickAggregator total_ticks 통계 정확화(로직 변경 없음).
+
 v1.2 - 2026-01-26 (긴급 업데이트) 🚨
 <!-- 이번 긴급 업데이트 -->
 

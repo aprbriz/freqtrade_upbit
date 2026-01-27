@@ -37,6 +37,8 @@ class TickAggregator:
                 return
             
             with self.lock:
+                # 통계 업데이트 (모든 틱 포함)
+                self.stats['total_ticks'] += 1
                 candle = self.current.get(pair)
                 
                 if not candle:
@@ -81,9 +83,6 @@ class TickAggregator:
                     
                     # 저장 후 제거
                     self.current.pop(pair, None)
-                
-                # 통계 업데이트
-                self.stats['total_ticks'] += 1
                 
         except Exception as e:
             logger.error(f"[{pair}] TickAggregator 업데이트 에러: {e}")

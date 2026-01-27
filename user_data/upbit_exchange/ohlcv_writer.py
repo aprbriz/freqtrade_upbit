@@ -37,6 +37,8 @@ class OHLCVWriter:
         # [개선3] 연결 객체를 인스턴스 변수로 유지
         # 이유: 매번 연결/해제하면 느림
         self.conn = None
+        self.closed = False
+        self.close_lock = threading.Lock()
         
         # [개선3-2] 데이터 정합성 통계
         self.stats = {
@@ -302,6 +304,11 @@ class OHLCVWriter:
         [개선17] 연결 종료 메서드
         이유: 리소스 정리 및 마지막 commit
         """
+        with self.close_lock:
+            if self.closed:
+                return
+            self.closed = True
+        
         logger.info("OHLCVWriter 종료 중...")
         
         try:
@@ -312,6 +319,7 @@ class OHLCVWriter:
             if self.conn:
                 with self.lock:
                     self.conn.close()
+                    self.conn = None
                 logger.info("DB 연결 종료 완료")
                 
         except Exception as e:
@@ -339,6 +347,8 @@ class OHLCVWriter:
         이유: 안전한 종료
         """
         try:
+            if getattr(self, "closed", False):
+                return
             if hasattr(self, 'conn') and self.conn:
                 self.close()
         except:

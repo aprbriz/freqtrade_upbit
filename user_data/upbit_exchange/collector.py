@@ -1,4 +1,5 @@
 # collector.py
+import os
 import json
 import time
 import signal
@@ -14,11 +15,19 @@ from multi_aggregator import MultiAggregator
 
 
 # watchdog 관련 logging 설정
+LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+LOG_FILE_PATH = os.path.join(LOG_DIR, "collector.log")
+LOG_FALLBACK = False
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+except Exception:
+    LOG_FALLBACK = True
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("collector.log"),
+        logging.FileHandler(LOG_FILE_PATH if not LOG_FALLBACK else "collector.log"),
         logging.StreamHandler()
     ]
 )
@@ -27,6 +36,8 @@ logging.basicConfig(
 
 
 logger = logging.getLogger("collector")
+if LOG_FALLBACK:
+    logger.warning("logs/ 디렉토리 생성 실패 → collector.log로 폴백")
 
 UPBIT_WS_URL = "wss://api.upbit.com/websocket/v1"
 PAIRS = ["KRW-BTC", "KRW-ETH", "KRW-XRP"]
@@ -67,8 +78,13 @@ class UpbitCollector:
         
         # [개선1] flush 타이머 추가
         # 이유: 주기적으로 flush하여 데이터 손실 방지
+        self.flush_lock = threading.Lock()
         self.flush_timer = None
         self.flush_interval = 1.0  # 1초마다 flush
+        self.flush_enabled = False
+        self.flush_idle_event = threading.Event()
+        self.flush_idle_event.set()
+        self.flush_wait_timeout = 5.0
         
         # [개선2] 종료 이벤트 추가
         # 이유: 종료 시그널을 명확하게 전달
@@ -132,42 +148,65 @@ class UpbitCollector:
         # 이유: 연결 종료 시 정리 작업
         close_info = self._parse_close_info(close_status_code, close_msg)
         self.last_close_info = close_info
-        if self.expected_reconnect_event.is_set():
-            logger.warning(f"WebSocket 연결 종료(의도적): {close_info}")
-        else:
-            logger.warning(f"WebSocket 연결 종료: {close_info}")
-        self._stop_flush_timer()
-        self._stop_periodic_reconnect_timer()
-        self.ws_close_event.set()
+        try:
+            if self.expected_reconnect_event.is_set():
+                logger.warning(f"WebSocket 연결 종료(의도적): {close_info}")
+            else:
+                logger.warning(f"WebSocket 연결 종료: {close_info}")
+            self._stop_flush_timer()
+            self._stop_periodic_reconnect_timer()
+        except Exception as e:
+            logger.error(f"on_close 정리 중 에러: {e}")
+        finally:
+            self.ws_close_event.set()
     
     def _periodic_flush(self):
         """
         [개선7] 주기적 flush 함수
         이유: 체결이 없어도 주기적으로 오래된 캔들 저장
         """
-        if not self.running:
-            return
+        with self.flush_lock:
+            if not self.flush_enabled or not self.running or self.shutdown_event.is_set():
+                self.flush_idle_event.set()
+                return
+            self.flush_idle_event.clear()
         
         try:
             self.aggregator.flush(MAX_LATE_MS)
         except Exception as e:
             logger.error(f"Flush 에러: {e}")
+        finally:
+            self.flush_idle_event.set()
         
         # 다음 flush 예약
-        if self.running:
-            self.flush_timer = threading.Timer(self.flush_interval, self._periodic_flush)
-            self.flush_timer.daemon = True
-            self.flush_timer.start()
+        with self.flush_lock:
+            if self.flush_enabled and self.running and not self.shutdown_event.is_set():
+                self._schedule_flush_locked()
     
     def _start_flush_timer(self):
         """flush 타이머 시작"""
-        if self.flush_timer is None or not self.flush_timer.is_alive():
-            self._periodic_flush()
+        with self.flush_lock:
+            if self.flush_enabled:
+                return
+            self.flush_enabled = True
+        # 첫 flush는 즉시 수행
+        self._periodic_flush()
     
     def _stop_flush_timer(self):
         """flush 타이머 중지"""
-        if self.flush_timer and self.flush_timer.is_alive():
-            self.flush_timer.cancel()
+        with self.flush_lock:
+            self.flush_enabled = False
+            if self.flush_timer:
+                self.flush_timer.cancel()
+                self.flush_timer = None
+
+    def _schedule_flush_locked(self):
+        """flush 타이머 예약 (flush_lock 필요)"""
+        if not self.flush_enabled or not self.running or self.shutdown_event.is_set():
+            return
+        self.flush_timer = threading.Timer(self.flush_interval, self._periodic_flush)
+        self.flush_timer.daemon = True
+        self.flush_timer.start()
     
     def _start_periodic_reconnect_timer(self):
         """주기적 재연결 타이머 시작 (중복 방지)"""
@@ -187,6 +226,13 @@ class UpbitCollector:
         with self.timer_lock:
             if self.periodic_reconnect_timer:
                 self.periodic_reconnect_timer.cancel()
+
+    def _wait_for_flush_idle(self):
+        """
+        flush 콜백 종료 대기 (timeout 포함)
+        """
+        if not self.flush_idle_event.wait(timeout=self.flush_wait_timeout):
+            logger.warning(f"flush 종료 대기 타임아웃: {self.flush_wait_timeout}s")
     
     def _request_periodic_reconnect(self):
         """
@@ -380,6 +426,7 @@ class UpbitCollector:
         # [개선13] flush 타이머 즉시 중지
         self._stop_flush_timer()
         self._stop_periodic_reconnect_timer()
+        self._wait_for_flush_idle()
         
         # [개선14] 마지막 flush 실행
         # 이유: 남은 데이터 저장

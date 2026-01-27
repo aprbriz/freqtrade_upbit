@@ -154,6 +154,7 @@ class MultiAggregator:
                 for tf in derived_timeframes_ms
             ]
         self.derived_last_ts = {}
+        self.derived_lock = threading.Lock()
         
         # [개선3] 통계 정보 추가
         self.stats = {
@@ -300,10 +301,11 @@ class MultiAggregator:
         """
         1초봉 기반 합성 봉 업데이트
         """
-        last_ts = self.derived_last_ts.get(pair)
-        if last_ts is not None and ts_ms <= last_ts:
-            logger.warning(f"[{pair}] 1초봉 타임스탬프 역전: last={last_ts}, now={ts_ms}")
-        self.derived_last_ts[pair] = ts_ms
+        with self.derived_lock:
+            last_ts = self.derived_last_ts.get(pair)
+            if last_ts is not None and ts_ms <= last_ts:
+                logger.warning(f"[{pair}] 1초봉 타임스탬프 역전: last={last_ts}, now={ts_ms}")
+            self.derived_last_ts[pair] = ts_ms
         for derived in self.derived_aggrs:
             try:
                 derived.update_from_candle(pair, ts_ms, candle)
