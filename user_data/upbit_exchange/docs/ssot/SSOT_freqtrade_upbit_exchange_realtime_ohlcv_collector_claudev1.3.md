@@ -181,15 +181,15 @@ Phase 1: 핵심 기능 (완료 ✅)
 [x] freqtrade Strategy 연동: ../strategies/UpbitMicroStructureStrategy.py
 [x] XRP 페어 추가 (정상 작동 확인)
 
-Phase 2: 단기 개선 (예정)
+Phase 2: 단기 개선 (완료 ✅)
 
-[ ] 1초봉 → 5초/10초/33초/57초/1분 합성 로직 (메모리에서만 처리)
-[ ] 10초봉, 1분봉, 10분봉용 별도 WebSocket 연결 및 DB 파일 생성
-[ ] 통계 정보 출력 (실시간 모니터링)
-[ ] 설정 파일 분리 (config_upbit_exchange.yml)
-[ ] CLI 인자 지원 (pairs, timeframes)
-[ ] 헬스체크 엔드포인트 (simple HTTP)
-[ ] 데이터 정합성 검증 로직
+[x] 1초봉 → 5초/10초/33초/57초/1분 합성 로직 (메모리에서만 처리)
+[x] 10초봉, 1분봉, 10분봉용 별도 WebSocket 연결 및 DB 파일 생성
+[x] 통계 정보 출력 (실시간 모니터링)
+[x] 설정 파일 분리 (config_upbit_exchange.yml)
+[x] CLI 인자 지원 (pairs, timeframes)
+[x] 헬스체크 엔드포인트 (simple HTTP)
+[x] 데이터 정합성 검증 로직
 
 Phase 3: 장기 확장 (백로그)
 
