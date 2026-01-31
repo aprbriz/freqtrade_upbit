@@ -1,6 +1,6 @@
 업비트 실시간 OHLCV 수집기 - SSOT (Single Source of Truth)
 프로젝트: Freqtrade_upbit Real-time OHLCV Collector
-버전: v2.3 (간소화)
+버전: v2.4 (Phase 2.5 PC 앱 설계 추가)
 생성일: 2026-01-26
 최종 업데이트: 2026-01-28
 
@@ -52,10 +52,11 @@ IR-005: 데이터 무결성
 - 업비트 KRW 3개 pair (BTC, ETH, XRP)
 - 다중 타임프레임 OHLCV, SQLite 저장
 - 24시간+ 무중단 운영, 재연결, 안전 종료
+- **Phase 2.5: PC 차트 앱 (듀얼 모니터, Raw Trade WS, LIVE 오버레이)**
 
 ❌ Out-of-Scope
 - 데이터 분석/시각화, 백테스팅, 트레이딩 로직
-- REST API, Web UI, 타 거래소
+- REST API, 타 거래소
 
 
 🎯 ACCEPTANCE CRITERIA (완료 기준)
@@ -118,6 +119,20 @@ DEC-013: 큐 오버로드 격리/회복 (P2-003)
 
 DEC-014: 디렉토리 구조 분리 ✅
 - common/cloud/pc_app 구조로 코드 재사용성/유지보수성 향상
+
+DEC-015: PC 앱 듀얼 모니터 UI (Phase 2.5)
+- 듀얼 모니터 기본 전제
+- 모니터 1: XRP + BTC 듀얼 차트 (50:50)
+- 모니터 2: ETH 차트 (80%) + 통합 진단 패널 (20%)
+- 단일 프로세스, 2개 독립 창, PyQt5/PySide6
+- 상태: ✅ 설계 확정 (2026-01-28)
+
+DEC-016: PC 앱 WebSocket 최적화 (Phase 2.5)
+- Raw trade 단일 구독 방식 (구독 수 항상 3개 고정)
+- 로컬 Aggregation (common/MultiAggregator 재사용)
+- 타임프레임 변경 시 WS 재구독 불필요 (0.1초 전환)
+- "Active + Previous" 정책 폐기 (TTL 불필요)
+- 상태: ✅ 설계 확정 (2026-01-28)
 
 
 🚧 PHASE 2 구현 명세 v2.0 (간소화)
@@ -237,11 +252,34 @@ BL-P2-OPS: config/CLI/HTTP, 통계, 정합성
 BL-P2-PROTECT: 중복 제거, 전역 레이트리밋, DB 재시도, 큐 보호
 BL-P2-VERIFY: 24시간 테스트, AC 검증
 
+Phase 2.5: PC 차트 앱 (설계 완료 ✅, 구현 대기 🚧)
+BL-PC-001: 듀얼 모니터 UI 구현
+- 모니터 1: XRP + BTC 듀얼 차트
+- 모니터 2: ETH + 진단 패널
+- PyQt5/PySide6, 단일 프로세스, 2개 독립 창
+- 상세: `pc_app/DESIGN_DUAL_MONITOR.md`
+
+BL-PC-002: Raw Trade WebSocket + 로컬 Aggregation
+- 3개 심볼 raw trade 구독 고정
+- common/MultiAggregator 재사용
+- 타임프레임 변경 시 즉시 전환 (0.1초)
+- 상세: `pc_app/WEBSOCKET_OPTIMIZATION.md`
+
+BL-PC-003: DB + LIVE 오버레이 병합
+- DB_ONLY / LIVE_WARMUP / LIVE_ACTIVE / LIVE_COOLDOWN
+- BURST 감지, cutover_ts 병합, bounded 메모리
+- 상태 칩 (LIVE/DB, WS:OK, NORMAL/BURST)
+
+BL-PC-004: UI 스타일 (Upbit 유사)
+- dual-chart-monitor.html 프로토타입 기준
+- 컬러: #0a1929(차트배경), #f23645(상승), #2979ff(하락), #0051c7(로고)
+- 1920x1080 고정, 상단 헤더/컨트롤/상태칩, 하단 티커
+
 단기 (Phase 2 완료 후)
 - P2-REQ로 흡수됨
 
 중기 (1개월)
-BL-006: 차트 제작 (web or PC-APP)
+BL-006: PC 차트 앱 구현 완료 (Phase 2.5)
 BL-007: freqtrade Web UI 연동
 
 장기 (3개월+)
@@ -252,6 +290,12 @@ BL-012: 실시간 알림
 
 
 🔄 UPDATE HISTORY
+
+v2.4 - 2026-01-28 (Phase 2.5 PC 앱 설계 추가)
+- DEC-015: 듀얼 모니터 UI 설계 확정
+- DEC-016: Raw Trade WebSocket 최적화 설계 확정
+- BL-PC-001~004: PC 앱 구현 백로그 추가
+- 목적: PC 차트 앱 설계 문서화, Phase 2.5 준비
 
 v2.3 - 2026-01-28 (SSOT 간소화)
 - Phase 2 정책/요구사항 핵심만 간소화
@@ -294,6 +338,7 @@ python collector.py --http-port 8000        # HTTP 활성화
 - 9시간 자동 재연결
 
 
-마지막 업데이트: 2026-01-28 (v2.3)
-다음 단계: Phase 2 v2.0 구현 → 24시간 검증 테스트
+마지막 업데이트: 2026-01-28 (v2.4)
+다음 단계: Phase 2 v2.0 구현 → 24시간 검증 → Phase 2.5 PC 앱 구현
 상세 이력: update_history.txt
+PC 앱 설계: pc_app/DESIGN_DUAL_MONITOR.md, pc_app/WEBSOCKET_OPTIMIZATION.md
