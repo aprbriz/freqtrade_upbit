@@ -3,8 +3,8 @@ import time
 import logging
 import threading
 from collections import defaultdict, deque
-from timeframe_aggregator import TimeframeAggregator
-from tick_aggregator import TickAggregator
+from common.timeframe_aggregator import TimeframeAggregator
+from common.tick_aggregator import TickAggregator
 
 logger = logging.getLogger("multi-aggregator")
 
