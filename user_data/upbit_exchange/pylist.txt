@@ -6,14 +6,29 @@
 - 다음 단계(Next):
 - SSOT/Task 위치:
 
-마지막으로 아래 링크는 "우리 프로젝트"의 코드 등이야. 아래 링크만 "장기기억"하고 미리 소스 보지말고 필요시에만 열어줘.
+*. 아래 링크는 "우리 프로젝트"의 코드 등이야. 아래 링크만 "장기기억"하고 미리 소스 보지말고 필요시에만 열어줘.
 https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/docs/ssot/SSOT_freqtrade_upbit_exchange_realtime_ohlcv_collector_claudev1.2.md
 
+# Cloud Collector (Phase 2 다중 DB)
 https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/collector.py
-https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/multi_aggregator.py
-https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/ohlcv_writer.py
-https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/tick_aggregator.py
-https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/timeframe_aggregator.py
-https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/collector.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/cloud/collector.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/cloud/multi_aggregator.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/cloud/ohlcv_writer.py
+
+# Common (Cloud + PC 공유)
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/common/constants.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/common/dedup_cache.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/common/reconnect_limiter.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/common/tick_aggregator.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/common/timeframe_aggregator.py
+
+# PC App (Phase 2.5 듀얼 모니터 차트)
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/pc_app/qt.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/pc_app/engine.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/pc_app/ui.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/pc_app/pc_app_main.py
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/pc_app/README.md
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/pc_app/DESIGN_DUAL_MONITOR.md
+https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/upbit_exchange/pc_app/WEBSOCKET_OPTIMIZATION.md
 
 https://raw.githubusercontent.com/aprbriz/freqtrade_upbit/main/user_data/strategies/UpbitMicroStructureStrategy.py

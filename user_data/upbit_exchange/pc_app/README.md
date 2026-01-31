@@ -25,7 +25,7 @@ Cloud Collector가 수집한 SQLite DB를 읽어 실시간 차트를 PC에서 �
 3. **정지(PAUSED)**: 일시 정지 (DB 연결 유지)
 4. **종료(STOPPED)**: 리소스 정리, 프로그램 종료
 
-### 주요 모듈 (계획)
+### 주요 모듈 (구현)
 
 #### engine.py (MainEngine)
 - DB 읽기 (SQLite 읽기 전용)
@@ -34,31 +34,25 @@ Cloud Collector가 수집한 SQLite DB를 읽어 실시간 차트를 PC에서 �
 - Overlay Manager (심볼별 메모리)
 - State Machine (심볼별 + 전역)
 
-#### windows/window1.py (메인 트레이딩)
-- XRP 차트 UI (좌측 50%)
-- BTC 차트 UI (우측 50%)
+#### ui.py (Window1/Window2 + ChartPanel)
+- XRP/BTC 듀얼 차트 (좌우 50%)
+- ETH 차트 + 진단 패널 (우측)
 - 하단 티커 (시스템 상태)
+- 캔들/거래량 렌더링 및 상태 칩
 
-#### windows/window2.py (ETH + 진단)
-- ETH 차트 UI (좌측 60%)
-- 통합 진단 패널 (우측 40%)
-- 행동 버튼 (LIVE 시작, DB 전환, ACK)
-
-#### ui/chart_panel.py
-- 캔들스틱 차트 렌더링
-- 가격 헤더, 컨트롤 바
-- 상태 칩 (MODE, WS, BURST)
-- 거래량 차트
-
-#### ui/diagnostic_panel.py
-- 3개 심볼 전체 상태 표시
-- 시간 정보, 오버레이 정보
-- 데이터 정합성, WS 연결 상태
-- BURST 지표, 갭 이벤트
+#### pc_app_main.py (엔트리포인트)
+- 듀얼 모니터 배치/폴백
+- 주기적 UI 업데이트 (20Hz)
+- 종료 시 설정 저장
 
 ## 개발 일정
-- Phase 2.5+ 구현 예정
+- Phase 2.5+ 진행 중
 - common/ 모듈 재사용으로 일관성 보장
+
+## 실행
+```bash
+python pc_app/pc_app_main.py
+```
 
 ## 상세 문서
 - **듀얼 모니터 설계**: `DESIGN_DUAL_MONITOR.md`
