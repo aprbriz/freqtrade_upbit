@@ -4,6 +4,7 @@ import threading
 import time
 import queue
 import random
+import re
 from pathlib import Path
 import logging
 
@@ -80,6 +81,7 @@ class OHLCVWriter:
         self.last_invalid_log_ts = 0.0
         self.last_order_log_ts = 0.0
         self.last_write_ts = None
+        self._table_naming_logged = False
         
         # DB 초기화
         self._init_db()
@@ -125,12 +127,24 @@ class OHLCVWriter:
     # =========================================================
     # 테이블 관련
     # =========================================================
-    def _table_name(self, pair: str) -> str:
+    def _sanitize_identifier(self, value: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_-]", "_", value)
+
+    def _quote_ident(self, ident: str) -> str:
+        safe = ident.replace('"', "_")
+        return f"\"{safe}\""
+
+    def _table_name(self, pair: str, timeframe_ms: int) -> str:
         """
         pair 이름을 테이블 이름으로 변환
-        예) KRW-BTC → ohlcv_KRW_BTC
+        예) KRW-BTC → ohlcv_KRW_BTC_tf1000
         """
-        return f"ohlcv_{pair.replace('-', '_')}"
+        base = self._sanitize_identifier(pair.replace("-", "_"))
+        tf = self._sanitize_identifier(str(timeframe_ms))
+        if not self._table_naming_logged:
+            logger.info("테이블 네이밍 규칙 적용: ohlcv_{PAIR}_tf{timeframe_ms} (타임프레임별 분리)")
+            self._table_naming_logged = True
+        return f"ohlcv_{base}_tf{tf}"
     
     def _create_table_if_not_exists(self, table: str):
         """
@@ -145,8 +159,9 @@ class OHLCVWriter:
         if table in self._table_cache:
             return
         
+        table_quoted = self._quote_ident(table)
         sql = f"""
-        CREATE TABLE IF NOT EXISTS {table} (
+        CREATE TABLE IF NOT EXISTS {table_quoted} (
             ts INTEGER PRIMARY KEY,
             open REAL NOT NULL,
             high REAL NOT NULL,
@@ -159,9 +174,11 @@ class OHLCVWriter:
         self.conn.execute(sql)
         
         # ts + timeframe 조회 성능용 인덱스
+        index_name = self._sanitize_identifier(f"idx_{table}_tf")
+        index_quoted = self._quote_ident(index_name)
         self.conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_{table}_tf "
-            f"ON {table}(timeframe_ms, ts DESC);"
+            f"CREATE INDEX IF NOT EXISTS {index_quoted} "
+            f"ON {table_quoted}(timeframe_ms, ts DESC);"
         )
         
         # [개선10] 캐시에 추가
@@ -216,11 +233,11 @@ class OHLCVWriter:
             self._log_invalid(f"[{pair}] 검증 실패: {e}")
             return False
 
-    def _check_ts_order(self, table: str, timeframe_ms: int, ts: int):
+    def _check_ts_order(self, table: str, ts: int):
         """
         타임스탬프 순서 검증 (경고만)
         """
-        key = f"{table}:{timeframe_ms}"
+        key = table
         last_ts = self.last_ts.get(key)
         if last_ts is not None and ts < last_ts:
             self.stats['out_of_order_writes'] += 1
@@ -289,11 +306,12 @@ class OHLCVWriter:
             self.worker_done_event.set()
 
     def _write_one(self, pair: str, ts: int, timeframe_ms: int, candle: dict):
-        table = self._table_name(pair)
-        self._check_ts_order(table, timeframe_ms, ts)
+        table = self._table_name(pair, timeframe_ms)
+        self._check_ts_order(table, ts)
 
+        table_quoted = self._quote_ident(table)
         sql = f"""
-        INSERT INTO {table}
+        INSERT INTO {table_quoted}
         (ts, open, high, low, close, volume, timeframe_ms)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(ts) DO UPDATE SET
@@ -398,9 +416,9 @@ class OHLCVWriter:
                 
                 for table in tables:
                     logger.info(f"데이터 정리: {table}, cutoff={cutoff_ts}")
-                    
+                    table_quoted = self._quote_ident(table)
                     cursor.execute(
-                        f"DELETE FROM {table} WHERE ts < ?",
+                        f"DELETE FROM {table_quoted} WHERE ts < ?",
                         (cutoff_ts,)
                     )
                     deleted = cursor.rowcount
@@ -412,6 +430,23 @@ class OHLCVWriter:
         except sqlite3.Error as e:
             logger.error(f"데이터 정리 에러: {e}")
     
+    def _wait_queue_drained(self, timeout: float) -> bool:
+        done = threading.Event()
+
+        def _join_queue():
+            try:
+                self.write_queue.join()
+            finally:
+                done.set()
+
+        thread = threading.Thread(
+            target=_join_queue,
+            name="ohlcv-writer-queue-join",
+            daemon=True,
+        )
+        thread.start()
+        return done.wait(timeout=timeout)
+
     def close(self):
         """
         [개선17] 연결 종료 메서드
@@ -427,14 +462,9 @@ class OHLCVWriter:
         try:
             # 큐 처리 중단 및 drain 대기
             self.stop_event.set()
-            deadline = time.time() + 10.0
-            while time.time() < deadline:
-                if self.write_queue.unfinished_tasks == 0:
-                    break
-                time.sleep(0.1)
-            if self.write_queue.unfinished_tasks > 0:
+            if not self._wait_queue_drained(timeout=10.0):
                 logger.warning(
-                    f"Writer 큐 drain 타임아웃 (pending={self.write_queue.unfinished_tasks})"
+                    f"Writer 큐 drain 타임아웃 (qsize={self.write_queue.qsize()})"
                 )
 
             if self.worker_thread and self.worker_thread.is_alive():

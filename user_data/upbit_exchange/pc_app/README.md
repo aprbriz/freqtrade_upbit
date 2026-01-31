@@ -1,60 +1,154 @@
-# PC Chart App (Phase 2.5+)
+# Upbit Real-Time Chart PC App
 
-## 목적
-Cloud Collector가 수집한 SQLite DB를 읽어 실시간 차트를 PC에서 표시
+**Windows PC용 실시간 차트 앱** - 업비트 트레이딩 전용 듀얼 모니터 차트
 
-## 🖥️ 듀얼 모니터 기본 전제 (2026-01-28 업데이트)
+## 📊 개요
 
-### 레이아웃
-- **모니터 1**: XRP + BTC 듀얼 차트 (좌우 50:50)
-- **모니터 2**: ETH 차트 (좌 60%) + 통합 진단 패널 (우 40%)
-- **단일 프로세스**: 2개 독립 창 관리
-- **자동 폴백**: 단일 모니터 환경 시 탭/스택 모드
+### 핵심 기능
 
-### 주요 특징
-- 3개 심볼 동시 모니터링 (XRP, BTC, ETH)
-- 폭주 시 즉시 대응 가능
-- 통합 진단 패널 (전체 시스템 상태)
-- 창 간 데이터 동기화 (context_id 기반)
+- **평시**: Oracle Cloud DB (SQLite) 읽기 전용 조회
+- **폭주(BURST)**: Upbit WebSocket 직접 구독 + LIVE 오버레이
+- **듀얼 모니터**: 모니터 1(XRP+BTC), 모니터 2(ETH+진단패널)
+- **Raw Trade 단일 구독**: 3개 심볼 고정, 타임프레임 0.1초 전환
+- **업비트 유사 UI**: 마지막 봉이 틱 단위로 실시간 갱신
 
-## 설계 원칙 (phase2 작업지시서.md.md 참조)
+### 모드
 
-### 상태 머신 (4-state)
-1. **초기화(INIT)**: DB 연결, 설정 로드
-2. **실행(RUNNING)**: 차트 표시, 실시간 업데이트
-3. **정지(PAUSED)**: 일시 정지 (DB 연결 유지)
-4. **종료(STOPPED)**: 리소스 정리, 프로그램 종료
+- **DB_ONLY**: 평시 DB 조회 (안정)
+- **LIVE_ACTIVE**: BURST 감지 후 실시간 WS 구독
+- **섞임 방지**: context_id + generation_id 기반 격리
 
-### 주요 모듈 (구현)
+---
 
-#### engine.py (MainEngine)
-- DB 읽기 (SQLite 읽기 전용)
-- WS Manager (Upbit 3개 심볼 구독)
-- BURST Detector (심볼별 독립)
-- Overlay Manager (심볼별 메모리)
-- State Machine (심볼별 + 전역)
+## 🚀 빠른 시작 (Windows PC)
 
-#### ui.py (Window1/Window2 + ChartPanel)
-- XRP/BTC 듀얼 차트 (좌우 50%)
-- ETH 차트 + 진단 패널 (우측)
-- 하단 티커 (시스템 상태)
-- 캔들/거래량 렌더링 및 상태 칩
+**⭐ 상세 가이드**: `WINDOWS_SETUP.md` 참조
 
-#### pc_app_main.py (엔트리포인트)
-- 듀얼 모니터 배치/폴백
-- 주기적 UI 업데이트 (20Hz)
-- 종료 시 설정 저장
+```powershell
+# 1. Python 3.8+ 설치 확인
+python --version
 
-## 개발 일정
-- Phase 2.5+ 진행 중
-- common/ 모듈 재사용으로 일관성 보장
+# 2. 의존성 설치
+pip install -r requirements.txt
 
-## 실행
-```bash
-python pc_app/pc_app_main.py
+# 3. 실행
+python pc_app_main.py
 ```
 
-## 상세 문서
-- **듀얼 모니터 설계**: `DESIGN_DUAL_MONITOR.md`
-- **변경 요약**: `DUAL_MONITOR_SUMMARY.md`
-- **전체 스펙**: `/home/opc/python/ft_userdata_upbit/user_data/upbit_exchange_memo/phase2 작업시지서.md.md`
+---
+
+## 📁 파일 구조
+
+```
+pc_app/
+├── pc_app_main.py          # 엔트리포인트
+├── engine.py               # MainEngine (WS + Aggregation + BURST)
+├── ui.py                   # PyQt5 UI (듀얼 모니터)
+├── qt.py                   # PyQt5/PySide6 호환 레이어
+├── requirements.txt        # 의존성
+├── README.md              # 이 파일
+├── WINDOWS_SETUP.md       # Windows 설치 가이드 ⭐
+├── DESIGN_DUAL_MONITOR.md # 듀얼 모니터 상세 설계
+└── WEBSOCKET_OPTIMIZATION.md # WebSocket 최적화 전략
+```
+
+---
+
+## 🖥️ 듀얼 모니터 레이아웃
+
+### 모니터 1 (메인 트레이딩)
+- 좌측 50%: **XRP** 차트
+- 우측 50%: **BTC** 차트
+- 각 차트: 헤더 + 컨트롤 + 캔들차트 + 거래량 + 티커
+
+### 모니터 2 (ETH + 진단)
+- 좌측 80%: **ETH** 차트
+- 우측 20%: **통합 진단 패널** (3개 심볼 상태)
+
+### 단일 모니터 폴백
+- 자동 상하 분할
+- 탭/스택 모드
+
+---
+
+## ⚙️ 설정
+
+### config.json (자동 생성)
+
+```json
+{
+  "db_path": "ohlcv_short.sqlite",
+  "ws_url": "wss://api.upbit.com/websocket/v1",
+  "symbols": ["KRW-XRP", "KRW-BTC", "KRW-ETH"],
+  "window_positions": {
+    "window1": {"x": 0, "y": 0, "width": 1920, "height": 1080},
+    "window2": {"x": 1920, "y": 0, "width": 1920, "height": 1080}
+  }
+}
+```
+
+### 로그
+
+`%LOCALAPPDATA%\UpbitRealTimeChart\logs\app.log`
+
+---
+
+## 🎯 사용 방법
+
+### 기본 조작
+
+1. **타임프레임 선택**: 드롭다운에서 1분/5분/15분/1시간/일봉
+2. **LIVE 모드**: 진단 패널에서 "LIVE 시작" 버튼
+3. **DB 전환**: "DB로 전환(안정)" 버튼
+4. **BURST ACK**: BURST 알림 확인 버튼
+
+### 상태 칩 (우측 상단)
+
+- **MODE**: DB_ONLY / LIVE_ACTIVE
+- **WS**: OK / RECONNECTING / DEGRADED
+- **BURST**: NORMAL / CANDIDATE / ACTIVE
+
+---
+
+## 🔧 기술 스택
+
+- **GUI**: PyQt5 / PySide6
+- **WebSocket**: websocket-client
+- **Aggregation**: common/MultiAggregator 재사용
+- **DB**: SQLite (읽기 전용, mode=ro)
+- **Architecture**: 단일 프로세스, 2개 독립 창
+
+---
+
+## 📚 참조 문서
+
+### 이 디렉토리
+- `WINDOWS_SETUP.md` ⭐ - **Windows 설치/실행 가이드**
+- `DESIGN_DUAL_MONITOR.md` - 듀얼 모니터 상세 설계
+- `WEBSOCKET_OPTIMIZATION.md` - WebSocket 최적화 전략
+- `WEBSOCKET_STRATEGY.md` (v2.0) - WS 구독 전략
+- `DUAL_MONITOR_SUMMARY.md` - 변경 요약
+
+### 상위 문서
+- `../docs/ssot/SSOT_*.md` - 전체 프로젝트 SSOT
+- `../upbit_exchange_memo/phase2 작업시지서.md.md` - Phase 2.5 작업지시서
+
+---
+
+## ⚠️ 주의사항
+
+- **PC 앱은 읽기 전용**: DB 수정하지 않음
+- **Cloud Collector가 정본**: PC 앱은 조회/모니터링 전용
+- **LIVE 모드는 일시적**: BURST 종료 후 자동 DB 복귀
+- **24/7 실행 비권장**: 트레이딩 시간만 실행 권장
+
+---
+
+## 🐛 문제 해결
+
+`WINDOWS_SETUP.md`의 "문제 해결" 섹션 참조
+
+---
+
+**상태**: Phase 2.5 구현 완료 ✅ (2026-01-28)  
+**다음 단계**: Windows PC 테스트 및 피드백

@@ -1,0 +1,12 @@
+# PC Chart App Requirements
+# Windows 10/11 (64-bit)
+
+# GUI Framework (둘 중 하나만 설치)
+PyQt5>=5.15.0
+# PySide6>=6.0.0  # 대안
+
+# 필수 라이브러리
+websocket-client>=1.0.0
+
+# 선택 (일반적으로 이미 설치됨)
+# pathlib  # Python 3.4+ 기본 포함

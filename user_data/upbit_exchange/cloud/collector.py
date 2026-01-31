@@ -16,6 +16,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 PARENT_DIR = Path(__file__).resolve().parent.parent
 if str(PARENT_DIR) not in sys.path:
     sys.path.insert(0, str(PARENT_DIR))
+BASE_DIR = PARENT_DIR  # cloud/ -> upbit_exchange/
 
 import websocket
 
@@ -27,8 +28,8 @@ from cloud.multi_aggregator import MultiAggregator
 
 
 # watchdog 관련 logging 설정
-LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
-LOG_FILE_PATH = os.path.join(LOG_DIR, "collector.log")
+LOG_DIR = BASE_DIR / "logs"
+LOG_FILE_PATH = LOG_DIR / "collector.log"
 LOG_FALLBACK = False
 try:
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -39,7 +40,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE_PATH if not LOG_FALLBACK else "collector.log"),
+        logging.FileHandler(str(LOG_FILE_PATH) if not LOG_FALLBACK else "collector.log"),
         logging.StreamHandler()
     ]
 )
@@ -49,7 +50,6 @@ if LOG_FALLBACK:
     logger.warning("logs/ 디렉토리 생성 실패 → collector.log로 폴백")
 
 UPBIT_WS_URL = "wss://api.upbit.com/websocket/v1"
-BASE_DIR = Path(__file__).resolve().parent.parent  # cloud/ -> upbit_exchange/
 
 
 DEFAULT_CONFIG_PATH = BASE_DIR / "config_upbit_exchange.yml"
@@ -179,6 +179,7 @@ class UpbitCollector:
         self.flush_idle_event = threading.Event()
         self.flush_idle_event.set()
         self.flush_wait_timeout = 5.0
+        self.flush_generation = 0
 
         # 메시지 파싱/검증 로그 제한
         self.message_parse_error_last_log_ts = 0.0
@@ -431,8 +432,11 @@ class UpbitCollector:
         with self.stats_lock:
             self.stats["out_of_order_trades"] += 1
 
-    def _periodic_flush(self):
+    def _periodic_flush(self, generation: int = None):
         with self.flush_lock:
+            if generation is not None and generation != self.flush_generation:
+                self.flush_idle_event.set()
+                return
             if not self.flush_enabled or not self.running or self.shutdown_event.is_set():
                 self.flush_idle_event.set()
                 return
@@ -450,6 +454,8 @@ class UpbitCollector:
             self.flush_idle_event.set()
 
         with self.flush_lock:
+            if generation is not None and generation != self.flush_generation:
+                return
             if self.flush_enabled and self.running and not self.shutdown_event.is_set():
                 self._schedule_flush_locked()
 
@@ -458,11 +464,14 @@ class UpbitCollector:
             if self.flush_enabled:
                 return
             self.flush_enabled = True
-        self._periodic_flush()
+            self.flush_generation += 1
+            generation = self.flush_generation
+        self._periodic_flush(generation=generation)
 
     def _stop_flush_timer(self):
         with self.flush_lock:
             self.flush_enabled = False
+            self.flush_generation += 1
             if self.flush_timer:
                 self.flush_timer.cancel()
                 self.flush_timer = None
@@ -470,7 +479,12 @@ class UpbitCollector:
     def _schedule_flush_locked(self):
         if not self.flush_enabled or not self.running or self.shutdown_event.is_set():
             return
-        self.flush_timer = threading.Timer(self.flush_interval, self._periodic_flush)
+        generation = self.flush_generation
+        self.flush_timer = threading.Timer(
+            self.flush_interval,
+            self._periodic_flush,
+            kwargs={"generation": generation},
+        )
         self.flush_timer.daemon = True
         self.flush_timer.start()
 
@@ -495,6 +509,26 @@ class UpbitCollector:
     def _wait_for_flush_idle(self):
         if not self.flush_idle_event.wait(timeout=self.flush_wait_timeout):
             self.logger.warning(f"flush 종료 대기 타임아웃: {self.flush_wait_timeout}s")
+
+    def _wait_queue_drained(self, q: queue.Queue, timeout: float, label: str) -> bool:
+        done = threading.Event()
+
+        def _join_queue():
+            try:
+                q.join()
+            finally:
+                done.set()
+
+        thread = threading.Thread(
+            target=_join_queue,
+            name=f"{label}-join",
+            daemon=True,
+        )
+        thread.start()
+        if not done.wait(timeout=timeout):
+            self.logger.warning(f"{label} drain 타임아웃 (qsize={q.qsize()}, timeout={timeout:.1f}s)")
+            return False
+        return True
 
     def _request_periodic_reconnect(self):
         if not self.running or self.shutdown_event.is_set():
@@ -682,15 +716,7 @@ class UpbitCollector:
         if self.ws_thread and self.ws_thread.is_alive():
             self.ws_thread.join(timeout=2.0)
 
-        drain_deadline = time.time() + 10.0
-        while time.time() < drain_deadline:
-            if self.trade_queue.unfinished_tasks == 0:
-                break
-            time.sleep(0.1)
-        if self.trade_queue.unfinished_tasks > 0:
-            self.logger.warning(
-                f"trade_queue drain 타임아웃 (pending={self.trade_queue.unfinished_tasks})"
-            )
+        self._wait_queue_drained(self.trade_queue, timeout=10.0, label="trade_queue")
 
         try:
             self.logger.info("마지막 flush 실행 중...")

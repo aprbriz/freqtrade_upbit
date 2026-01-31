@@ -1,7 +1,7 @@
 # 업비트 실시간 OHLCV 수집기 + PC 차트 앱 - SSOT (Single Source of Truth)
 
 **프로젝트**: Freqtrade_upbit Real-time OHLCV Collector + PC Chart App  
-**버전**: v3.0 (Phase 2.5 PC 앱 전체 명세 포함)  
+**버전**: v3.1 (Phase 2 P0 안정화 반영)  
 **생성일**: 2026-01-26  
 **최종 업데이트**: 2026-01-28  
 
@@ -360,6 +360,14 @@ upbit_exchange/
 - **이유**: 정확성 우선, 캔들 희생 방지
 - **상태**: ✅ 확정 (2026-01-28)
 
+### DEC-025: Phase 2 테이블 분리(타임프레임별) ✅
+- **규칙**: ohlcv_{QUOTE}_{BASE}_tf{timeframe_ms}
+- **PK**: ts 단일 PK 유지 (테이블 분리로 충돌 제거)
+- **음수 타임프레임**: tf-3 등 그대로 포함 (식별자 안전 처리)
+- **마이그레이션**: 기존 테이블 유지, 신규 규칙으로 새 테이블 생성
+- **이유**: 동일 ts 덮어쓰기(PK 충돌) 제거
+- **상태**: ✅ 확정 (2026-01-28)
+
 ---
 
 ## 🚧 PHASE 2: Cloud Collector 고도화 (간소화)
@@ -391,7 +399,7 @@ CollectorManager
 - **POL-002**: Collector (독립 WS/DB/Writer, 재연결, generation 모델)
 - **POL-003**: generation (재연결 시 증가, Derived reset)
 - **POL-004**: 재연결 (backoff/jitter/쿨다운)
-- **POL-005**: DB (WAL, locked/busy 재시도, DEGRADED)
+- **POL-005**: DB (WAL, locked/busy 재시도, DEGRADED, 테이블은 timeframe별 분리: ohlcv_{PAIR}_tf{timeframe_ms})
 - **POL-006**: 중복 제거 (trade_uuid → sequential_id → fallback)
 - **POL-007**: 큐/오버로드 (HIGH_WATERMARK, HARD_LIMIT)
 - **POL-008**: DerivedAggregator (Short만, 1초봉 기반, 메모리 전용)
@@ -1001,6 +1009,12 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 
 ## 🔄 UPDATE HISTORY
 
+### v3.1 - 2026-01-28 (Phase 2 P0 안정화 반영)
+- DEC-025: 타임프레임별 테이블 분리 확정 (PK 충돌 제거)
+- flush_timer 종료 레이스 제거 정책 반영 (cancel + idle wait + 재스케줄 차단)
+- unfinished_tasks 비공개 API 제거 정책 반영
+- Cloud 로그 경로를 프로젝트 루트 logs/로 고정
+
 ### v3.0 - 2026-01-28 (Phase 2.5 PC 앱 전체 명세 추가)
 - PC 앱 Objective, 아키텍처, 핵심 기능 전체 상세 명세
 - 듀얼 모니터 UI, Raw Trade WebSocket, BURST 감지, LIVE 오버레이, WS 재연결, UI 렌더링, 차트 표현, UI 스타일, DB 조회, 로깅, 설정, SQLite 접근, common/ 재사용, Hybrid, 스레드 분리, Android 알람 설계
@@ -1057,6 +1071,7 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 - ohlcv_short.sqlite
 - ohlcv_10s_1m.sqlite
 - ohlcv_10m.sqlite
+- 테이블 네이밍: ohlcv_{QUOTE}_{BASE}_tf{timeframe_ms}
 
 **PC 앱:**
 - Cloud DB의 로컬 복사본 (사용자 동기화)
@@ -1116,6 +1131,6 @@ python pc_app_main.py  # 기본 실행
 
 ---
 
-**마지막 업데이트**: 2026-01-28 (v3.0)  
+**마지막 업데이트**: 2026-01-28 (v3.1)  
 **다음 단계**: Phase 2 v2.0 구현 → 24시간 검증 → Phase 2.5 PC 앱 구현  
 **상태**: Phase 2 구현 대기 🚧, Phase 2.5 설계 완료 ✅
