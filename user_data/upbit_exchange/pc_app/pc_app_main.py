@@ -38,8 +38,9 @@ def _place_windows(window1: Window1, window2: Window2, config: Dict[str, int]) -
 def _update_ui(engine: MainEngine, window1: Window1, window2: Window2) -> None:
     window1.xrp_panel.update_snapshot(engine.get_snapshot("KRW-XRP"))
     window1.btc_panel.update_snapshot(engine.get_snapshot("KRW-BTC"))
-    window2.eth_panel.update_snapshot(engine.get_snapshot("KRW-ETH"))
-    window2.diagnostic_panel.update_diagnostics(engine.get_diagnostics())
+    eth_snapshot = engine.get_snapshot("KRW-ETH")
+    window2.eth_panel.update_snapshot(eth_snapshot)
+    window2.diagnostic_panel.update_diagnostics(engine.get_diagnostics(), eth_snapshot)
 
 
 def main() -> int:

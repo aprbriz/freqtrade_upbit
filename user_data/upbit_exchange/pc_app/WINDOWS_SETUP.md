@@ -104,6 +104,28 @@ PC 앱은 듀얼 모니터를 자동 감지하여 배치합니다:
 
 ---
 
+## 🖼️ 업비트 로고 설정 (필수)
+
+좌측 상단(심볼 왼쪽)에 **업비트 로고 이미지**를 표시합니다.
+
+1) 로고 파일을 아래 경로로 복사하세요:
+
+```
+freqtrade_upbit\user_data\upbit_exchange\pc_app\assets\upbit_logo.png
+```
+
+2) `config.json`에 로고 경로를 지정할 수도 있습니다:
+
+```json
+{
+  "logo_path": "assets/upbit_logo.png"
+}
+```
+
+로고가 없으면 텍스트 로고로 대체됩니다.
+
+---
+
 ## 🔧 설정 파일 위치
 
 - **실행 디렉토리**: `config.json` (우선)

@@ -80,6 +80,7 @@ pc_app/
   "db_path": "ohlcv_short.sqlite",
   "ws_url": "wss://api.upbit.com/websocket/v1",
   "symbols": ["KRW-XRP", "KRW-BTC", "KRW-ETH"],
+  "logo_path": "assets/upbit_logo.png",
   "window_positions": {
     "window1": {"x": 0, "y": 0, "width": 1920, "height": 1080},
     "window2": {"x": 1920, "y": 0, "width": 1920, "height": 1080}
@@ -141,6 +142,7 @@ pc_app/
 - **Cloud Collector가 정본**: PC 앱은 조회/모니터링 전용
 - **LIVE 모드는 일시적**: BURST 종료 후 자동 DB 복귀
 - **24/7 실행 비권장**: 트레이딩 시간만 실행 권장
+- **로고 파일 필요**: `assets/upbit_logo.png`에 로고 파일을 복사해야 함
 
 ---
 

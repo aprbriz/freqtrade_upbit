@@ -80,6 +80,7 @@ def load_or_create_config() -> Dict[str, Any]:
         "symbols": SYMBOLS,
         "default_timeframe_ms": DEFAULT_TIMEFRAME_MS,
         "db_path": "ohlcv_short.sqlite",
+        "logo_path": "assets/upbit_logo.png",
         "window_positions": {
             "window1": {"x": 0, "y": 0, "width": 1920, "height": 1080, "monitor": 0},
             "window2": {"x": 1920, "y": 0, "width": 1920, "height": 1080, "monitor": 1},
