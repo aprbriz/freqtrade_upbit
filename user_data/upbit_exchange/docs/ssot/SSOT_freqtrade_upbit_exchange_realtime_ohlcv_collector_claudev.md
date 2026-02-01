@@ -1,9 +1,9 @@
 # 업비트 실시간 OHLCV 수집기 + PC 차트 앱 - SSOT (Single Source of Truth)
 
 **프로젝트**: Freqtrade_upbit Real-time OHLCV Collector + PC Chart App  
-**버전**: v3.1 (Phase 2 P0 안정화 반영)  
+**버전**: v3.2 (PC 앱 UI 보강 반영)  
 **생성일**: 2026-01-26  
-**최종 업데이트**: 2026-01-28  
+**최종 업데이트**: 2026-02-01  
 
 ---
 
@@ -474,9 +474,10 @@ CollectorManager
 - 각 차트:
   - 심볼 헤더 (가격, 등락률, Upbit 로고)
   - 컨트롤 바 (타임프레임 드롭다운, 틱 레이어 토글, 상태 칩 3개)
-  - 차트 영역 (캔들스틱 + 가격 레이블)
-  - 거래량 차트
+  - 차트 영역 (캔들스틱 + 가격 레이블, X/Y축 + 숫자 표시)
+  - 거래량 차트 (Y축 + 거래금액 숫자 표시)
   - 하단 티커 (coalesce/드랍 안내)
+  - 초기 진입 시 DB에서 충분한 봉 로드 → 캔들 폭 ~3px 유지
 
 **모니터 2 (ETH + 진단 패널)**
 - 좌측 80%: ETH 차트 (모니터 1과 동일 구성)
@@ -1009,6 +1010,13 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 
 ## 🔄 UPDATE HISTORY
 
+### v3.2 - 2026-02-01 (PC 앱 UI 보강)
+- ETH 창 UI를 trading-monitor.jsx 기준으로 보강
+- 차트/거래량 축과 좌표 숫자 표시 추가
+- 초기 DB 로드로 캔들 폭 ~3px 유지
+- 진단 패널 버튼(LIVE/DB) 동작 연결
+- 상단 네비게이션 바 제거 (ETH 창)
+
 ### v3.1 - 2026-01-28 (Phase 2 P0 안정화 반영)
 - DEC-025: 타임프레임별 테이블 분리 확정 (PK 충돌 제거)
 - flush_timer 종료 레이스 제거 정책 반영 (cancel + idle wait + 재스케줄 차단)
@@ -1131,6 +1139,6 @@ python pc_app_main.py  # 기본 실행
 
 ---
 
-**마지막 업데이트**: 2026-01-28 (v3.1)  
+**마지막 업데이트**: 2026-02-01 (v3.2)  
 **다음 단계**: Phase 2 v2.0 구현 → 24시간 검증 → Phase 2.5 PC 앱 구현  
 **상태**: Phase 2 구현 대기 🚧, Phase 2.5 설계 완료 ✅

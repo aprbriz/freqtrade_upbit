@@ -35,9 +35,10 @@ class CandleChartWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self._candles: List[Candle] = []
         self.setMinimumHeight(300)
+        self._target_candle_width = 3
 
     def set_candles(self, candles: List[Candle]) -> None:
-        self._candles = candles[-120:]
+        self._candles = candles
         self.update()
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
@@ -51,23 +52,68 @@ class CandleChartWidget(QtWidgets.QWidget):
             painter.drawText(rect, QtCore.Qt.AlignCenter, "No data")
             return
 
-        lows = [c.low for c in self._candles]
-        highs = [c.high for c in self._candles]
+        right_margin = 48
+        bottom_margin = 18
+        left_margin = 6
+        top_margin = 6
+        plot_rect = QtCore.QRect(
+            rect.left() + left_margin,
+            rect.top() + top_margin,
+            rect.width() - left_margin - right_margin,
+            rect.height() - top_margin - bottom_margin,
+        )
+        target_count = max(1, int(plot_rect.width() / max(1, self._target_candle_width)))
+        candles = self._candles[-target_count:]
+
+        lows = [c.low for c in candles]
+        highs = [c.high for c in candles]
         min_low = min(lows)
         max_high = max(highs)
         if max_high <= min_low:
             max_high = min_low + 1.0
+        padding = (max_high - min_low) * 0.05
+        max_high += padding
+        min_low -= padding
 
-        chart_width = rect.width()
-        chart_height = rect.height() - 10
-        candle_width = max(2, int(chart_width / max(1, len(self._candles))))
+        chart_width = plot_rect.width()
+        chart_height = plot_rect.height()
+        step = chart_width / max(1, len(candles))
+        candle_width = max(1, int(step))
 
         def y_for(price: float) -> int:
             ratio = (price - min_low) / (max_high - min_low)
-            return rect.bottom() - int(ratio * chart_height) - 5
+            return plot_rect.bottom() - int(ratio * chart_height)
 
-        for idx, candle in enumerate(self._candles):
-            x = rect.left() + idx * candle_width
+        painter.setPen(QtGui.QColor("#1f2937"))
+        painter.drawLine(plot_rect.left(), plot_rect.top(), plot_rect.left(), plot_rect.bottom())
+
+        painter.setPen(QtGui.QColor("#6b7280"))
+        y_ticks = 5
+        for i in range(y_ticks):
+            ratio = i / (y_ticks - 1)
+            value = max_high - (max_high - min_low) * ratio
+            y = plot_rect.top() + int(ratio * chart_height)
+            painter.setPen(QtGui.QColor("#1f2937"))
+            painter.drawLine(plot_rect.left(), y, plot_rect.right(), y)
+            painter.setPen(QtGui.QColor("#6b7280"))
+            painter.drawText(
+                plot_rect.right() + 4,
+                y + 4,
+                f"{value:,.0f}",
+            )
+
+        x_ticks = 5
+        for i in range(x_ticks):
+            idx = int(i * (len(candles) - 1) / (x_ticks - 1)) if len(candles) > 1 else 0
+            candle = candles[idx]
+            x = plot_rect.left() + int(idx * step)
+            dt = QtCore.QDateTime.fromMSecsSinceEpoch(candle.ts_ms)
+            label = dt.toString("MM/dd HH:mm")
+            painter.setPen(QtGui.QColor("#6b7280"))
+            painter.drawText(x, rect.bottom() - 2, label)
+
+        for idx, candle in enumerate(candles):
+            x = plot_rect.left() + int(idx * step)
             open_y = y_for(candle.open)
             close_y = y_for(candle.close)
             high_y = y_for(candle.high)
@@ -77,7 +123,15 @@ class CandleChartWidget(QtWidgets.QWidget):
             painter.drawLine(x + candle_width // 2, high_y, x + candle_width // 2, low_y)
             top = min(open_y, close_y)
             height = max(1, abs(open_y - close_y))
-            painter.fillRect(QtCore.QRect(x, top, candle_width - 1, height), QtGui.QColor(color))
+            painter.fillRect(QtCore.QRect(x, top, candle_width, height), QtGui.QColor(color))
+
+        last_price = candles[-1].close
+        price_y = y_for(last_price)
+        price_label = f"{last_price:,.0f}"
+        price_rect = QtCore.QRect(plot_rect.right() - 6, price_y - 8, right_margin, 16)
+        painter.fillRect(price_rect, QtGui.QColor(UP_COLOR if candles[-1].close >= candles[-1].open else DOWN_COLOR))
+        painter.setPen(QtGui.QColor("white"))
+        painter.drawText(price_rect.adjusted(4, 0, -4, 0), QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft, price_label)
 
 
 class VolumeChartWidget(QtWidgets.QWidget):
@@ -85,9 +139,10 @@ class VolumeChartWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self._candles: List[Candle] = []
         self.setFixedHeight(80)
+        self._target_candle_width = 3
 
     def set_candles(self, candles: List[Candle]) -> None:
-        self._candles = candles[-120:]
+        self._candles = candles
         self.update()
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
@@ -98,14 +153,46 @@ class VolumeChartWidget(QtWidgets.QWidget):
 
         if not self._candles:
             return
-        max_vol = max(c.volume for c in self._candles) or 1.0
-        bar_width = max(2, int(rect.width() / max(1, len(self._candles))))
-        for idx, candle in enumerate(self._candles):
-            x = rect.left() + idx * bar_width
-            height = int((candle.volume / max_vol) * (rect.height() - 8))
-            y = rect.bottom() - height
+        right_margin = 48
+        left_margin = 6
+        top_margin = 6
+        plot_rect = QtCore.QRect(
+            rect.left() + left_margin,
+            rect.top() + top_margin,
+            rect.width() - left_margin - right_margin,
+            rect.height() - top_margin - 4,
+        )
+
+        target_count = max(1, int(plot_rect.width() / max(1, self._target_candle_width)))
+        candles = self._candles[-target_count:]
+        notionals = [c.volume * c.close for c in candles]
+        max_notional = max(notionals) if notionals else 1.0
+        max_notional = max_notional or 1.0
+        step = plot_rect.width() / max(1, len(candles))
+        bar_width = max(1, int(step))
+
+        painter.setPen(QtGui.QColor("#1f2937"))
+        painter.drawLine(plot_rect.left(), plot_rect.bottom(), plot_rect.right(), plot_rect.bottom())
+        painter.drawLine(plot_rect.left(), plot_rect.top(), plot_rect.left(), plot_rect.bottom())
+
+        y_ticks = 3
+        for i in range(y_ticks):
+            ratio = i / (y_ticks - 1)
+            value = max_notional * (1 - ratio)
+            y = plot_rect.top() + int(ratio * plot_rect.height())
+            painter.setPen(QtGui.QColor("#1f2937"))
+            painter.drawLine(plot_rect.left(), y, plot_rect.right(), y)
+            painter.setPen(QtGui.QColor("#6b7280"))
+            label = f"{value:,.0f}"
+            painter.drawText(plot_rect.right() + 4, y + 4, label)
+
+        for idx, candle in enumerate(candles):
+            x = plot_rect.left() + int(idx * step)
+            notional = candle.volume * candle.close
+            height = int((notional / max_notional) * (plot_rect.height() - 2))
+            y = plot_rect.bottom() - height
             color = UP_COLOR if candle.close >= candle.open else DOWN_COLOR
-            painter.fillRect(QtCore.QRect(x, y, bar_width - 1, height), QtGui.QColor(color))
+            painter.fillRect(QtCore.QRect(x, y, bar_width, height), QtGui.QColor(color))
 
 
 class ScrollingTicker(QtWidgets.QLabel):
@@ -394,6 +481,9 @@ class DiagnosticPanel(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self._labels: Dict[str, QtWidgets.QLabel] = {}
+        self.btn_live: Optional[QtWidgets.QPushButton] = None
+        self.btn_db: Optional[QtWidgets.QPushButton] = None
+        self.btn_ack: Optional[QtWidgets.QPushButton] = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -488,6 +578,12 @@ class DiagnosticPanel(QtWidgets.QWidget):
                 f"background:{color}; color:white; padding:6px; border-radius:4px; font-size:11px;"
             )
             button_layout.addWidget(btn)
+            if "LIVE" in text:
+                self.btn_live = btn
+            elif "DB로" in text:
+                self.btn_db = btn
+            else:
+                self.btn_ack = btn
         layout.addWidget(button_wrap)
         layout.addStretch()
 
@@ -601,7 +697,6 @@ class Window2(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(TopNavBar())
         body = QtWidgets.QHBoxLayout()
         self.eth_panel = ChartPanel("KRW-ETH", engine)
         self.diagnostic_panel = DiagnosticPanel()
@@ -611,3 +706,11 @@ class Window2(QtWidgets.QMainWindow):
         self.ticker = ScrollingTicker()
         layout.addWidget(self.ticker)
         self.setCentralWidget(central)
+        if self.diagnostic_panel.btn_live:
+            self.diagnostic_panel.btn_live.clicked.connect(
+                lambda: engine.set_symbol_mode("KRW-ETH", "LIVE")
+            )
+        if self.diagnostic_panel.btn_db:
+            self.diagnostic_panel.btn_db.clicked.connect(
+                lambda: engine.set_symbol_mode("KRW-ETH", "DB")
+            )

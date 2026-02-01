@@ -81,6 +81,7 @@ def load_or_create_config() -> Dict[str, Any]:
         "default_timeframe_ms": DEFAULT_TIMEFRAME_MS,
         "db_path": "ohlcv_short.sqlite",
         "logo_path": "assets/upbit_logo.png",
+        "initial_candles": 600,
         "window_positions": {
             "window1": {"x": 0, "y": 0, "width": 1920, "height": 1080, "monitor": 0},
             "window2": {"x": 1920, "y": 0, "width": 1920, "height": 1080, "monitor": 1},
@@ -179,6 +180,18 @@ class TimeframeAggregator:
             return list(self.candles)
         return list(self.candles) + [self.current]
 
+    def seed(self, candles: List[Candle]) -> None:
+        if not candles:
+            return
+        trimmed = candles[-self.max_store:]
+        if len(trimmed) >= 2:
+            self.candles = deque(trimmed[:-1], maxlen=self.max_store)
+            self.current = trimmed[-1]
+        else:
+            self.candles = deque([], maxlen=self.max_store)
+            self.current = trimmed[-1]
+        self.last_ts = self.current.ts_ms if self.current else None
+
 
 class TickAggregator:
     def __init__(self, tick_size: int, max_store: int = 1000) -> None:
@@ -241,11 +254,35 @@ class DBReader:
             self.logger.error("db open failed: %s", exc)
             return None
 
-    def load_recent(self, symbol: str, limit: int = 200) -> List[Candle]:
+    def _table_exists(self, table: str) -> bool:
+        conn = self._connect()
+        if conn is None:
+            return False
+        try:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()
+            return row is not None
+        except sqlite3.Error:
+            return False
+
+    def _table_name(self, symbol: str, timeframe_ms: Optional[int]) -> str:
+        base = f"ohlcv_{symbol.replace('-', '_')}"
+        if timeframe_ms is None:
+            return base
+        return f"{base}_tf{timeframe_ms}"
+
+    def load_recent(self, symbol: str, limit: int = 200, timeframe_ms: Optional[int] = None) -> List[Candle]:
         conn = self._connect()
         if conn is None:
             return []
-        table = f"ohlcv_{symbol.replace('-', '_')}"
+        table = self._table_name(symbol, timeframe_ms)
+        if not self._table_exists(table) and timeframe_ms is not None:
+            table = self._table_name(symbol, None)
+            if not self._table_exists(table):
+                self.logger.warning("db table not found: %s", table)
+                return []
         query = f"SELECT ts, open, high, low, close, volume FROM {table} ORDER BY ts DESC LIMIT ?"
         try:
             rows = conn.execute(query, (limit,)).fetchall()
@@ -383,6 +420,8 @@ class MainEngine:
         self._stop_event = threading.Event()
         self._worker: Optional[TradeFeedWorker] = None
         self.db_reader = DBReader(config.get("db_path", "ohlcv_short.sqlite"), logger)
+        self.initial_candles = int(config.get("initial_candles", 600))
+        self.mode_by_symbol = {symbol: "LIVE" for symbol in self.symbols}
 
         for symbol in self.symbols:
             timeframe_aggs = {
@@ -397,6 +436,7 @@ class MainEngine:
 
     def start(self) -> None:
         use_mock = bool(os.getenv("UPBIT_PCAPP_MOCK"))
+        self._seed_from_db()
         self._worker = TradeFeedWorker(
             symbols=self.symbols,
             on_trade=self.on_trade,
@@ -405,6 +445,33 @@ class MainEngine:
             use_mock=use_mock,
         )
         self._worker.start()
+
+    def _seed_from_db(self) -> None:
+        if self.initial_candles <= 0:
+            return
+        for symbol, state in self.states.items():
+            fallback = self.db_reader.load_recent(
+                symbol=symbol,
+                limit=self.initial_candles,
+                timeframe_ms=None,
+            )
+            for tf_ms, agg in state.timeframe_aggs.items():
+                candles = self.db_reader.load_recent(
+                    symbol=symbol,
+                    limit=self.initial_candles,
+                    timeframe_ms=tf_ms,
+                )
+                if not candles and fallback:
+                    candles = fallback
+                if candles:
+                    agg.seed(candles)
+            # last_price/prev_price 초기화
+            default_tf = self.active_timeframes.get(symbol, self.default_timeframe_ms)
+            seed_candles = state.timeframe_aggs[default_tf].snapshot()
+            if seed_candles:
+                state.last_price = seed_candles[-1].close
+                state.prev_price = seed_candles[-1].open
+                state.last_trade_ts = seed_candles[-1].ts_ms
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -432,6 +499,11 @@ class MainEngine:
             return
         self.active_timeframes[symbol] = timeframe_ms
 
+    def set_symbol_mode(self, symbol: str, mode: str) -> None:
+        if symbol not in self.mode_by_symbol:
+            return
+        self.mode_by_symbol[symbol] = mode
+
     def get_snapshot(self, symbol: str) -> Dict[str, Any]:
         with self._lock:
             state = self.states.get(symbol)
@@ -440,6 +512,8 @@ class MainEngine:
             tf_ms = self.active_timeframes.get(symbol, self.default_timeframe_ms)
             candles = state.timeframe_aggs[tf_ms].snapshot()
             last_price = state.last_price
+            if not last_price and candles:
+                last_price = candles[-1].close
             prev_price = state.prev_price or last_price
             price_change = last_price - prev_price if last_price else 0.0
             percent_change = 0.0
@@ -456,7 +530,7 @@ class MainEngine:
                 "price_change": price_change,
                 "percent_change": percent_change,
                 "candles": candles,
-                "mode": "LIVE",
+                "mode": self.mode_by_symbol.get(symbol, "LIVE"),
                 "ws_status": "OK" if last_age < 5 else "WARN",
                 "burst_status": "NORMAL",
                 "last_message_age": last_age,
@@ -477,7 +551,7 @@ class MainEngine:
                 if last_ts:
                     last_age = max(0.0, time.time() - last_ts)
                 diag["symbols"][symbol] = {
-                    "mode": "LIVE",
+                    "mode": self.mode_by_symbol.get(symbol, "LIVE"),
                     "ws": "OK" if last_age < 5 else "WARN",
                     "burst": "NORMAL",
                     "last_trade_ts": state.last_trade_ts,
