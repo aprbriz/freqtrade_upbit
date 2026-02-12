@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 from .engine import Candle, DISPLAY_NAMES, TIMEFRAMES_MS
-from .qt import QtCore, QtGui, QtWidgets
+from .qt import QtCore, QtGui, QtWidgets, Signal
 
 
 TIMEFRAME_LABELS = {
@@ -196,7 +196,7 @@ class StatusChip(QtWidgets.QLabel):
 
 
 class HeaderBar(QtWidgets.QFrame):
-    symbol_changed = QtCore.Signal(str)
+    symbol_changed = Signal(str)
 
     def __init__(self, show_tabs: bool = False, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
