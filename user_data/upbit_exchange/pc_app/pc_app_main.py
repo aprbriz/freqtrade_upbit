@@ -36,11 +36,23 @@ def _place_windows(window1: Window1, window2: Window2, config: Dict[str, int]) -
 
 
 def _update_ui(engine: MainEngine, window1: Window1, window2: Window2) -> None:
-    window1.xrp_panel.update_snapshot(engine.get_snapshot("KRW-XRP"))
-    window1.btc_panel.update_snapshot(engine.get_snapshot("KRW-BTC"))
-    eth_snapshot = engine.get_snapshot("KRW-ETH")
-    window2.eth_panel.update_snapshot(eth_snapshot)
-    window2.diagnostic_panel.update_diagnostics(engine.get_diagnostics(), eth_snapshot)
+    snaps = {symbol: engine.get_snapshot(symbol) for symbol in engine.symbols}
+    diag = engine.get_diagnostics()
+
+    window1.btc_area.update_snapshot(snaps.get("KRW-BTC", {}))
+    window1.eth_area.update_snapshot(snaps.get("KRW-ETH", {}))
+
+    active = window2.active_symbol
+    window2.xrp_area.update_snapshot(snaps.get(active, {}))
+    window2.update_dashboard(diag, snaps)
+
+    window1.header.update_status({"KRW-BTC": snaps.get("KRW-BTC", {}), "KRW-ETH": snaps.get("KRW-ETH", {})})
+    window2.header.update_status(snaps)
+
+    window1.footer.update_status(diag, snaps)
+    window2.footer.update_status(diag, snaps)
+    window1.alert.check_and_update(diag)
+    window2.alert.check_and_update(diag)
 
 
 def main() -> int:

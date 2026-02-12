@@ -1,9 +1,9 @@
 # 업비트 실시간 OHLCV 수집기 + PC 차트 앱 - SSOT (Single Source of Truth)
 
 **프로젝트**: Freqtrade_upbit Real-time OHLCV Collector + PC Chart App  
-**버전**: v3.2 (PC 앱 UI 보강 반영)  
+**버전**: v3.3 (diff-최소(=변경리스크 최소) 가드레일 + PC 앱 Light/Dark 테마 규칙 추가)  
 **생성일**: 2026-01-26  
-**최종 업데이트**: 2026-02-01  
+**최종 업데이트**: 2026-02-12  
 
 ---
 
@@ -18,13 +18,12 @@
 - 자동 재연결, graceful shutdown
 
 ### ✅ DEC-014 리팩토링 완료 (2026-01-28)
-```
 upbit_exchange/
-├── common/        # Cloud/PC 공통 (aggregator, dedup, reconnect)
-├── cloud/         # Cloud Collector (collector, writer, multi_aggregator)
-├── pc_app/        # PC 차트 앱 (Phase 2.5)
-└── collector.py   # 래퍼
-```
+├── common/ # Cloud/PC 공통 (aggregator, dedup, reconnect)
+├── cloud/ # Cloud Collector (collector, writer, multi_aggregator)
+├── pc_app/ # PC 차트 앱 (Phase 2.5)
+└── collector.py # 래퍼
+
 
 ### 🚧 Phase 2: Cloud Collector 고도화 (구현 대기)
 - CollectorManager + Short/Mid/Long 분리
@@ -72,6 +71,13 @@ upbit_exchange/
 - 섞임/유령 캔들 방지 (context_id, generation_id)
 - cutover_ts 기준 병합
 
+### IR-006: “diff 최소”는 작업량 최소가 아니라 **변경 리스크 최소**
+- “diff 최소”는 **AC/SSOT 100% 충족을 전제로** 변경량을 최소화하여 회귀/드리프트 위험을 줄이는 규칙이다.
+- **기능 축소/스펙 삭제/완화 금지**(AC/SSOT에 있는 요구사항은 유지).
+- “diff 최소”보다 우선하는 것: **(1) AC 충족 (2) 운영 안정성(재연결/종료/누수/중복) (3) 데이터 무결성**.
+- 리팩토링/정리/추상화는 금지(단, AC 충족에 “필수”인 최소 범위만 예외).
+- 임시 땜빵(TODO/주석으로 남기기) 금지. **테스트 없이도 바로 실행 가능**해야 한다.
+
 ---
 
 ## 📋 SCOPE
@@ -101,6 +107,7 @@ upbit_exchange/
 - **WS 재연결 안정화** (backoff/jitter/cooldown, Upbit 레이트리밋 준수)
 - **coalesce + 하단 티커** (UI 프리징 방지)
 - **context_id/generation_id 기반 섞임 방지**
+- **Light/Dark 테마 전제(라이트 기본 + 다크 옵션)** (DEC-026, DEC-027)
 
 ### ❌ Out-of-Scope
 
@@ -159,6 +166,9 @@ upbit_exchange/
 - [ ] 3틱봉 인덱스축 + KST 툴팁
 - [ ] Raw Trade 단일 구독 (3개 심볼 고정)
 - [ ] 타임프레임 변경 시 즉시 전환 (0.1초)
+- [ ] **테마 기본값 Light(흰 배경) 적용** (DEC-027)
+- [ ] **테마 토글 Dark(검정/다크) 적용** (DEC-027)
+- [ ] **테마 전환 시 텍스트/아이콘/그리드/구분선 자동 조정(가독성 유지)** (DEC-027)
 
 ### AC-PC-002: PC 앱 성능/안정성
 - [ ] BURST 폭주 시 UI 프리징 없음 (coalesce 허용)
@@ -171,6 +181,7 @@ upbit_exchange/
 - [ ] 로그 로테이션 적용 (24/7 대응)
 - [ ] SQLite 로컬 복사본 mode=ro 오픈
 - [ ] 듀얼 모니터 핫플러그 대응 (자동 폴백)
+- [ ] **테마 전환이 성능/프리징에 영향 없음(토큰 기반, 즉시 반영)** (DEC-027)
 
 ### AC-PC-003: PC 앱 섞임 방지
 - [ ] Raw Trade 방식 섞임 방지 (context_id, generation_id)
@@ -217,6 +228,8 @@ upbit_exchange/
 - [ ] Upbit 유사 UI 스타일 (dual-chart-monitor.html 기준)
 - [ ] config.json, 로그 로테이션
 - [ ] 듀얼 모니터 핫플러그 대응
+- [ ] **Light/Dark 테마 토글 + 토큰 시스템 적용** (DEC-027)
+- [ ] **상승=빨강 / 하락=파랑 유지 + 경고/장애 의미 분리** (DEC-027)
 
 ---
 
@@ -251,6 +264,11 @@ upbit_exchange/
 - **대응**: bounded 버퍼 (시간 + 개수 2중 제한)
 - **모니터링**: overlay 범위, 스냅샷 크기
 
+### 🟡 RISK-PC-006: 라이트 테마에서 가독성/계층 붕괴
+- **증상**: 그리드 과진/희미, 카드 경계 소실, 경고가 차트 색(빨강/파랑)과 혼동, 상단 바 과도한 자극, KPI 강조 실패
+- **대응**: 토큰 기반 테마 + 계층 규칙 강제 (DEC-027)
+- **검증**: Light/Dark 모두에서 동일한 정보 계층 체감 유지
+
 ---
 
 ## 📝 DECISION LOG (주요 결정)
@@ -277,8 +295,8 @@ upbit_exchange/
 
 ### DEC-015: PC 앱 듀얼 모니터 UI (Phase 2.5) ✅
 - **듀얼 모니터 기본 전제**
-- 모니터 1: XRP + BTC 듀얼 차트 (50:50)
-- 모니터 2: ETH 차트 (80%) + 통합 진단 패널 (20%)
+- 모니터 1: BTC + ETH 듀얼 차트 (50:50)
+- 모니터 2: XRP 차트 (80%) + 통합 진단 패널 (20%)
 - 단일 프로세스, 2개 독립 창, PyQt5/PySide6
 - 단일 모니터 환경 시 자동 폴백 (탭/스택 모드)
 - **이유**: 트레이딩 효율성, 동시 모니터링, 진단 정보 통합
@@ -368,6 +386,26 @@ upbit_exchange/
 - **이유**: 동일 ts 덮어쓰기(PK 충돌) 제거
 - **상태**: ✅ 확정 (2026-01-28)
 
+### DEC-026: “diff 최소” 운용 규칙(개발/수정 공통) ✅
+- **정의**: diff 최소는 “작업량 최소”가 아니라 **변경 리스크(회귀/드리프트) 최소**를 의미
+- **금지**: 기능 축소/스펙 삭제/완화, TODO/임시 땜빵
+- **우선순위**: AC/SSOT 충족 > 운영 안정성(재연결/종료/누수/중복) > diff 최소
+- **예외**: AC 충족을 위해 구조 변경이 필수라면, diff 최소를 이유로 회피 금지(SSOT/Task에 근거 남기기)
+- **상태**: ✅ 원칙 확정 (2026-02-12)
+
+### DEC-027: PC 앱 Light/Dark 테마 규칙 ✅
+- **전제**: 라이트(흰 배경) 기본 + 다크(검정/다크) 옵션(토글)
+- **토큰 기반**: background/surface/border/text-primary/text-secondary/grid/accent/warning/danger 등을 역할 기반으로 정의
+- **가독성**: 테마 전환 시 텍스트/아이콘/그리드/구분선 자동 조정, 동일한 정보 계층 체감 유지
+- **차트 색 확정**: **상승=빨강, 하락=파랑**(가격 전용 의미)
+- **경고/장애 색 분리**: 가격색(빨강/파랑)과 혼동되지 않게 별도 의미체계(배지/아이콘/스트립/테두리 강조 중심)
+- **라이트 취약점 방지(필수)**:
+  - 그리드/축 과진·희미 방지(3단 대비)
+  - 카드 경계 소실 방지(surface/background 톤 분리)
+  - 상단 스트립 과자극 방지(Info/Warning/Critical 톤 분리)
+  - KPI 계층(숫자/단위/설명) 고정, 임계치 초과 시만 강강조
+- **상태**: ✅ 원칙 확정 (2026-02-12)
+
 ---
 
 ## 🚧 PHASE 2: Cloud Collector 고도화 (간소화)
@@ -383,16 +421,15 @@ upbit_exchange/
 - ❌ Non: watchdog, 새 파일(승인 없이), REST 보정, 외부 재시작
 
 ### 아키텍처
-```
 CollectorManager
-  ├─ ShortCollector (ohlcv_short.sqlite)
-  │    ├─ Timeframe(500ms, 1s) + Tick(3) → DB
-  │    └─ Derived(5s,10s,33s,57s,1m) → 메모리 전용
-  ├─ MidCollector (ohlcv_10s_1m.sqlite)
-  │    └─ Timeframe(10s, 1m) → DB
-  └─ LongCollector (ohlcv_10m.sqlite)
-       └─ Timeframe(10m) → DB
-```
+├─ ShortCollector (ohlcv_short.sqlite)
+│ ├─ Timeframe(500ms, 1s) + Tick(3) → DB
+│ └─ Derived(5s,10s,33s,57s,1m) → 메모리 전용
+├─ MidCollector (ohlcv_10s_1m.sqlite)
+│ └─ Timeframe(10s, 1m) → DB
+└─ LongCollector (ohlcv_10m.sqlite)
+└─ Timeframe(10m) → DB
+
 
 ### 핵심 정책 (POL-001~013)
 - **POL-001**: CollectorManager (생성/관리, graceful shutdown, 전역 레이트리밋)
@@ -439,31 +476,29 @@ CollectorManager
 ### 2. 아키텍처 개요
 
 #### 2.1 전체 구조
-```
 [PC 앱]
 ├─ MainEngine
-│  ├─ WS Manager (3 symbols, raw trade)
-│  ├─ Aggregation Engine (common/MultiAggregator)
-│  ├─ BURST Detector (2단계 게이트 + 히스테리시스)
-│  ├─ Overlay Manager (bounded, cutover_ts)
-│  └─ Snapshot Provider (UI용 immutable)
+│ ├─ WS Manager (3 symbols, raw trade)
+│ ├─ Aggregation Engine (common/MultiAggregator)
+│ ├─ BURST Detector (2단계 게이트 + 히스테리시스)
+│ ├─ Overlay Manager (bounded, cutover_ts)
+│ └─ Snapshot Provider (UI용 immutable)
 ├─ UI Layer (PyQt5/PySide6)
-│  ├─ Window 1: XRP + BTC 듀얼 차트
-│  ├─ Window 2: ETH 차트 + 통합 진단 패널
-│  └─ 하단 티커 (coalesce/드랍 안내)
+│ ├─ Window 1: XRP + BTC 듀얼 차트
+│ ├─ Window 2: ETH 차트 + 통합 진단 패널
+│ └─ 하단 티커 (coalesce/드랍 안내)
 └─ DB Layer (SQLite read-only)
-```
+
 
 #### 2.2 데이터 흐름
-```
 [Upbit WS] → [raw trade] → [Aggregator] → [Overlay] → [Snapshot] → [UI]
-                                              ↓
-                                          [BURST Detector]
-                                              ↓
-                                          [Mode Switch]
-                                              ↓
+↓
+[BURST Detector]
+↓
+[Mode Switch]
+↓
 [DB (Cloud)] ←───────── [cutover_ts 병합] ───────→ [Overlay]
-```
+
 
 ### 3. 핵심 기능 명세
 
@@ -548,12 +583,11 @@ CollectorManager
 - `LIVE_COOLDOWN`: LIVE 종료 준비 (DB catch-up 확인)
 
 **전환 흐름**
-```
 DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
-   ↑                                                      ↓
-   └──────────────────────────────────────────────────────┘
-                (BURST 종료 or 사용자 전환)
-```
+↑ ↓
+└──────────────────────────────────────────────────────┘
+(BURST 종료 or 사용자 전환)
+
 
 **WSState (LIVE 계열 전용)**
 - `WS_CONNECTED`: 정상
@@ -902,6 +936,9 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 - [ ] 3틱봉 인덱스축 + KST 툴팁
 - [ ] Raw Trade 단일 구독 (3개)
 - [ ] 타임프레임 즉시 전환 (0.1초)
+- [ ] Light 기본 + Dark 옵션 토글 동작
+- [ ] 테마 전환 시 글꼴/아이콘/그리드/구분선 가독성 유지
+- [ ] 가격(빨강/파랑)과 경고/장애 표현 혼동 없음
 
 #### 5.2 PC 앱 성능/안정성
 - [ ] BURST 폭주 시 UI 프리징 없음
@@ -992,6 +1029,13 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 - 프로파일링 후 병목 확인
 - C++ 핫루프 (집계, ring buffer, 스냅샷)
 
+**BL-PC-011: Light/Dark 테마 토큰 + 토글(필수)**
+- Light 기본(흰 배경) + Dark 옵션
+- 토큰: background/surface/border/text/grid/accent/warning/danger
+- 테마 전환 시 가독성/정보 계층 유지
+- 가격(빨강/파랑) 전용 의미 + 경고/장애 의미 분리
+- 라이트 취약점 5종(그리드/카드/경고/스트립/KPI) 방지
+
 ### 단기 (Phase 2 완료 후)
 - P2-REQ로 흡수됨
 
@@ -1009,6 +1053,13 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 ---
 
 ## 🔄 UPDATE HISTORY
+
+### v3.3 - 2026-02-12 (diff-최소 가드레일 + 테마 규칙 추가)
+- IR-006 추가: diff 최소 = 변경리스크 최소(기능 축소/스펙 삭제 금지, AC 우선)
+- DEC-026 추가: diff-최소 운용 규칙 확정
+- DEC-027 추가: PC 앱 Light/Dark 테마 토큰 규칙 + 가격색(빨강/파랑) 확정 의미 분리
+- AC-PC-001/002 및 DoD/Backlog에 테마 항목 추가
+- RISK-PC-006 추가: 라이트 테마 가독성/계층 붕괴 리스크 및 완화
 
 ### v3.2 - 2026-02-01 (PC 앱 UI 보강)
 - ETH 창 UI를 trading-monitor.jsx 기준으로 보강
@@ -1091,54 +1142,55 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 python collector.py                         # 기본
 python collector.py --pairs KRW-BTC,KRW-ETH # pair 지정
 python collector.py --http-port 8000        # HTTP 활성화
-```
+PC 앱 (Phase 2.5 구현 후):
 
-**PC 앱 (Phase 2.5 구현 후):**
-```bash
 python pc_app_main.py  # 기본 실행
 # config.json에서 설정 로드
-```
+종료
+Cloud:
 
-### 종료
+Ctrl+C (5초 이내 안전 종료)
 
-**Cloud:**
-- Ctrl+C (5초 이내 안전 종료)
+PC 앱:
 
-**PC 앱:**
-- 창 닫기 또는 종료 버튼
-- graceful shutdown (스레드/소켓 정리)
+창 닫기 또는 종료 버튼
 
-### 운영
+graceful shutdown (스레드/소켓 정리)
 
-**Cloud:**
-- 24시간+ 무중단 가능 ✅
-- 로그: tail -f logs/collector.log
-- 9시간 자동 재연결
+운영
+Cloud:
 
-**PC 앱:**
-- 노트북/PC 켜진 동안만 LIVE
-- DB는 Cloud에서 주기적 동기화
-- 설정: config.json
-- 로그: %LOCALAPPDATA%/UpbitRealTimeChart/logs/app.log
+24시간+ 무중단 가능 ✅
 
----
+로그: tail -f logs/collector.log
 
-## 📚 참조 문서
+9시간 자동 재연결
 
-### Cloud (Phase 2)
-- update_history.txt (Phase 0/1 상세 이력)
+PC 앱:
 
-### PC 앱 (Phase 2.5)
-- pc_app/README.md
-- pc_app/DESIGN_DUAL_MONITOR.md (듀얼 모니터 상세 설계)
-- pc_app/WEBSOCKET_OPTIMIZATION.md (WebSocket 최적화 상세)
-- pc_app/WEBSOCKET_STRATEGY.md (v2.0)
-- pc_app/DUAL_MONITOR_SUMMARY.md (변경 요약)
-- user_data/upbit_exchange_memo/dual-chart-monitor.html (UI 프로토타입)
-- user_data/upbit_exchange_memo/phase2 작업시지서.md.md (전체 작업지시서)
+노트북/PC 켜진 동안만 LIVE
 
----
+DB는 Cloud에서 주기적 동기화
 
-**마지막 업데이트**: 2026-02-01 (v3.2)  
-**다음 단계**: Phase 2 v2.0 구현 → 24시간 검증 → Phase 2.5 PC 앱 구현  
-**상태**: Phase 2 구현 대기 🚧, Phase 2.5 설계 완료 ✅
+설정: config.json
+
+로그: %LOCALAPPDATA%/UpbitRealTimeChart/logs/app.log
+
+📚 참조 문서
+Cloud (Phase 2)
+update_history.txt (Phase 0/1 상세 이력)
+
+PC 앱 (Phase 2.5)
+pc_app/README.md
+pc_app/DESIGN_DUAL_MONITOR.md (듀얼 모니터 상세 설계)
+pc_app/WEBSOCKET_OPTIMIZATION.md (WebSocket 최적화 상세)
+pc_app/WEBSOCKET_STRATEGY.md (v2.0)
+pc_app/DUAL_MONITOR_SUMMARY.md (변경 요약)
+user_data/upbit_exchange_memo/dual-chart-monitor.html (UI 프로토타입)
+user_data/upbit_exchange_memo/phase2 작업시지서.md.md (전체 작업지시서)
+
+마지막 업데이트: 2026-02-12 (v3.3)
+다음 단계: Phase 2 v2.0 구현 → 24시간 검증 → Phase 2.5 PC 앱 구현
+상태: Phase 2 구현 대기 🚧, Phase 2.5 설계 완료 ✅
+
+::contentReference[oaicite:0]{index=0}
