@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:1920px; height:1080px; overflow:hidden; font-family:'Noto Sans CJK KR','Noto Sans KR',sans-serif; background:#FFFFFF; color:#1A1D24; }
+
+.header { height:48px; background:#F6F7F9; border-bottom:1px solid #E2E4E9; display:flex; align-items:center; padding:0 16px; gap:10px; }
+.header .logo { height:22px; }
+.header .label { font-size:14px; font-weight:600; color:#3D4350; }
+.chip { display:inline-flex; align-items:center; padding:0 9px; height:22px; border-radius:11px; font-size:11px; font-weight:600; white-space:nowrap; }
+.chip-ok { background:rgba(13,159,97,0.08); color:#0D9F61; }
+.chip-warn { background:rgba(217,119,6,0.07); color:#D97706; }
+.spacer { flex:1; }
+.theme-label { font-size:10px; color:#9CA3AF; margin-right:4px; }
+.theme-btn { width:28px; height:28px; border-radius:6px; border:1px solid #E2E4E9; background:#FFFFFF; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:#6B7280; }
+.alert-text { font-size:11px; font-weight:500; color:#D97706; background:rgba(217,119,6,0.07); border:1px solid rgba(217,119,6,0.14); border-radius:6px; padding:2px 10px; height:24px; display:flex; align-items:center; }
+
+.main { display:flex; height:calc(1080px - 48px - 28px); }
+.chart-pane { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+.chart-pane + .chart-pane { border-left:1px solid #E2E4E9; }
+
+.chart-header { padding:12px 16px 8px 16px; }
+.chart-title-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+.symbol-name { font-size:13px; font-weight:600; color:#3D4350; }
+.tf-select { font-size:11px; padding:3px 8px; border:1px solid #E2E4E9; border-radius:4px; background:#F6F7F9; color:#3D4350; appearance:auto; }
+.price-row { display:flex; align-items:baseline; gap:10px; }
+.price { font-size:32px; font-weight:700; line-height:1.2; }
+.price-up { color:#E54040; }
+.price-down { color:#3182F6; }
+.change { font-size:13px; font-weight:500; }
+
+.candle-area { flex:1; min-height:280px; position:relative; }
+.candle-area svg { width:100%; height:100%; }
+.volume-area { height:92px; border-top:1px solid #F0F1F4; position:relative; }
+.volume-area svg { width:100%; height:100%; }
+
+.footer { height:28px; background:#F6F7F9; border-top:1px solid #E2E4E9; display:flex; align-items:center; padding:0 16px; }
+.footer span { font-size:11px; color:#6B7280; }
+
+.grid-line { stroke:#F0F1F4; stroke-width:1; }
+.axis-label { font-size:9px; fill:#9CA3AF; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <img class="logo" src="data:image/png;base64,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" alt="Upbit">
+  <span class="label">Monitor</span>
+  <span class="chip chip-ok">● LIVE</span>
+  <span class="chip chip-ok">● WS 0.3s</span>
+  <span class="spacer"></span>
+  <span class="alert-text">⚠ 경고: WS 상태 불안정 (KRW-BTC)</span>
+  <span class="chip chip-ok">● LIVE</span>
+  <span class="chip chip-ok">● WS 0.2s</span>
+  <span class="theme-label">LIGHT THEME</span>
+  <div class="theme-btn">⚙</div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <!-- BTC Chart -->
+  <div class="chart-pane">
+    <div class="chart-header">
+      <div class="chart-title-row">
+        <span class="symbol-name">BTC / KRW</span>
+        <select class="tf-select"><option>1시간</option></select>
+      </div>
+      <div class="price-row">
+        <span class="price price-up">137,845,000</span>
+        <span class="change price-up">+2.39% ▲3,215,000</span>
+      </div>
+    </div>
+    <div class="candle-area"><svg id="btc-candle"></svg></div>
+    <div class="volume-area"><svg id="btc-vol"></svg></div>
+  </div>
+  <!-- ETH Chart -->
+  <div class="chart-pane">
+    <div class="chart-header">
+      <div class="chart-title-row">
+        <span class="symbol-name">ETH / KRW</span>
+        <select class="tf-select"><option>1시간</option></select>
+      </div>
+      <div class="price-row">
+        <span class="price price-up">5,121,000</span>
+        <span class="change price-up">+1.85% ▲93,000</span>
+      </div>
+    </div>
+    <div class="candle-area"><svg id="eth-candle"></svg></div>
+    <div class="volume-area"><svg id="eth-vol"></svg></div>
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="footer">
+  <span>● Last Tick 0.3s | Reconnects 0 | DB Lag 12ms | Uptime 2h 15m 33s</span>
+</div>
+
+<script>
+// Seeded PRNG (mulberry32)
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+
+function generateCandles(seed, basePrice, volatilityPct, count){
+  var rng=mulberry32(seed);
+  var candles=[];var price=basePrice;
+  for(var i=0;i<count;i++){
+    var change=(rng()-0.48)*basePrice*volatilityPct;
+    var o=price,c=price+change;
+    var h=Math.max(o,c)+rng()*Math.abs(change)*0.5;
+    var l=Math.min(o,c)-rng()*Math.abs(change)*0.5;
+    var v=rng()*0.8+0.2;
+    candles.push({o:o,h:h,l:l,c:c,v:v});
+    price=c;
+  }
+  return candles;
+}
+
+function drawCandles(svgId, candles, rightMargin){
+  var svg=document.getElementById(svgId);
+  var W=svg.clientWidth, H=svg.clientHeight;
+  var rm=rightMargin||52, bm=18;
+  var pw=W-rm, ph=H-bm;
+  var allH=candles.map(c=>c.h), allL=candles.map(c=>c.l);
+  var minP=Math.min(...allL)*0.999, maxP=Math.max(...allH)*1.001;
+  var pRange=maxP-minP||1;
+  var barW=pw/candles.length, bodyW=barW*0.7;
+  var html='';
+  // Grid
+  for(var g=0;g<5;g++){
+    var gy=ph*g/4;
+    html+='<line x1="0" y1="'+gy+'" x2="'+pw+'" y2="'+gy+'" class="grid-line"/>';
+    var pv=maxP-(maxP-minP)*g/4;
+    html+='<text x="'+(pw+4)+'" y="'+(gy+3)+'" class="axis-label">'+formatPrice(pv)+'</text>';
+  }
+  // X-axis labels
+  for(var xi=0;xi<5;xi++){
+    var idx=Math.floor(xi*candles.length/5);
+    var xp=idx*barW+bodyW/2;
+    var hr=8+xi*3, mn=xi*12;
+    html+='<text x="'+xp+'" y="'+(ph+14)+'" class="axis-label" text-anchor="middle">'+pad(hr)+':'+pad(mn)+'</text>';
+  }
+  // Candles
+  for(var i=0;i<candles.length;i++){
+    var c=candles[i], x=i*barW, up=c.c>=c.o;
+    var color=up?'#E54040':'#3182F6';
+    var wx=x+bodyW/2;
+    var yh=(1-(c.h-minP)/pRange)*ph;
+    var yl=(1-(c.l-minP)/pRange)*ph;
+    var yo=(1-(c.o-minP)/pRange)*ph;
+    var yc=(1-(c.c-minP)/pRange)*ph;
+    var bt=Math.min(yo,yc), bh=Math.max(Math.abs(yc-yo),1);
+    html+='<line x1="'+wx.toFixed(1)+'" y1="'+yh.toFixed(1)+'" x2="'+wx.toFixed(1)+'" y2="'+yl.toFixed(1)+'" stroke="'+color+'" stroke-width="1"/>';
+    html+='<rect x="'+x.toFixed(1)+'" y="'+bt.toFixed(1)+'" width="'+bodyW.toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="'+color+'"/>';
+  }
+  svg.innerHTML=html;
+}
+
+function drawVolume(svgId, candles, rightMargin){
+  var svg=document.getElementById(svgId);
+  var W=svg.clientWidth, H=svg.clientHeight;
+  var rm=rightMargin||52, pw=W-rm, ph=H-4;
+  var barW=pw/candles.length, bodyW=barW*0.7;
+  var maxV=Math.max(...candles.map(c=>c.v));
+  var html='';
+  for(var g=0;g<3;g++){
+    var gy=ph*g/2;
+    html+='<line x1="0" y1="'+gy+'" x2="'+pw+'" y2="'+gy+'" class="grid-line"/>';
+  }
+  for(var i=0;i<candles.length;i++){
+    var c=candles[i], x=i*barW, up=c.c>=c.o;
+    var color=up?'#E54040':'#3182F6';
+    var bh=(c.v/maxV)*ph;
+    html+='<rect x="'+x.toFixed(1)+'" y="'+(ph-bh).toFixed(1)+'" width="'+bodyW.toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="'+color+'" opacity="0.6"/>';
+  }
+  svg.innerHTML=html;
+}
+
+function formatPrice(p){
+  if(p>=1000000) return (p/1000000).toFixed(1)+'M';
+  if(p>=1000) return (p/1000).toFixed(1)+'K';
+  return p.toFixed(0);
+}
+function pad(n){return n<10?'0'+n:''+n;}
+
+var btcCandles=generateCandles(42, 134000000, 0.008, 60);
+var ethCandles=generateCandles(77, 5020000, 0.01, 60);
+
+drawCandles('btc-candle', btcCandles);
+drawVolume('btc-vol', btcCandles);
+drawCandles('eth-candle', ethCandles);
+drawVolume('eth-vol', ethCandles);
+</script>
+</body>
+</html>

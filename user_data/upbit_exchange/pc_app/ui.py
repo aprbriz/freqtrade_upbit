@@ -207,6 +207,8 @@ class HeaderBar(QtWidgets.QFrame):
         self.ws_chip = StatusChip("● WS 0.0s")
         self.live_chip_right = StatusChip("● LIVE")
         self.ws_chip_right = StatusChip("● WS 0.0s")
+        self.alert_label = QtWidgets.QLabel("")
+        self.alert_label.hide()
         self.theme_label = QtWidgets.QLabel("LIGHT THEME")
         self.theme_btn = QtWidgets.QToolButton()
         self.theme_btn.setText("⚙")
@@ -243,6 +245,7 @@ class HeaderBar(QtWidgets.QFrame):
         layout.addWidget(self.live_chip)
         layout.addWidget(self.ws_chip)
         layout.addStretch()
+        layout.addWidget(self.alert_label)
         if not self.show_tabs:
             layout.addWidget(self.live_chip_right)
             layout.addWidget(self.ws_chip_right)
@@ -268,6 +271,21 @@ class HeaderBar(QtWidgets.QFrame):
         for sym, btn in self.tab_group.items():
             btn.setChecked(sym == symbol)
         self.apply_theme()
+
+    def check_alert(self, diag: Dict[str, Any]) -> None:
+        symbols = diag.get("symbols", {})
+        bad = [s for s, st in symbols.items() if st.get("ws") not in ("OK",)]
+        if bad:
+            self.alert_label.setText(f"⚠ 경고: WS 상태 불안정 ({', '.join(bad)})")
+            self.alert_label.show()
+            t = ThemeManager.current()
+            self.alert_label.setStyleSheet(
+                f"font-size:11px; font-weight:500; color:{t['status-warn']};"
+                f"background:{t['status-warn-dim']}; border:1px solid {t['status-warn-medium']};"
+                "border-radius:6px; padding:2px 10px;"
+            )
+        else:
+            self.alert_label.hide()
 
     def update_status(self, snaps: Dict[str, Dict[str, Any]]) -> None:
         ordered = [snaps[k] for k in sorted(snaps.keys()) if snaps.get(k)]
@@ -431,7 +449,6 @@ class ChartArea(QtWidgets.QFrame):
         self.symbol = symbol
         self._snapshot: Dict[str, Any] = {}
         self.title = QtWidgets.QLabel()
-        self.title2 = QtWidgets.QLabel()
         self.price = QtWidgets.QLabel("-")
         self.change = QtWidgets.QLabel("-")
         self.tf_combo = QtWidgets.QComboBox()
@@ -452,30 +469,30 @@ class ChartArea(QtWidgets.QFrame):
         layout.setSpacing(0)
 
         top = QtWidgets.QFrame()
-        top.setFixedHeight(86)
+        top.setFixedHeight(60)
         top_l = QtWidgets.QVBoxLayout(top)
         top_l.setContentsMargins(10, 6, 10, 6)
+        top_l.setSpacing(4)
 
-        self.title.setText(f"{self._format_symbol()} · 1분봉")
-        self.title.setStyleSheet("font-size:11px;")
-        top_l.addWidget(self.title)
-        self.title2.setText("1분")
-        self.title2.setStyleSheet("font-size:10px;")
-        top_l.addWidget(self.title2, 0, QtCore.Qt.AlignLeft)
-
-        row = QtWidgets.QHBoxLayout()
-        self.price.setStyleSheet("font-size:34px; font-weight:700;")
-        self.change.setStyleSheet("font-size:12px;")
-        row.addWidget(self.price)
-        row.addWidget(self.change)
-        row.addStretch()
-        top_l.addLayout(row)
-
+        title_row = QtWidgets.QHBoxLayout()
+        self.title.setText(self._format_symbol())
+        self.title.setStyleSheet("font-size:13px; font-weight:600;")
+        title_row.addWidget(self.title)
+        title_row.addStretch()
         self.tf_combo.setFixedWidth(90)
         for tf in TIMEFRAMES_MS:
             self.tf_combo.addItem(TIMEFRAME_LABELS.get(tf, str(tf)), tf)
         self.tf_combo.currentIndexChanged.connect(self._on_tf_changed)
-        top_l.addWidget(self.tf_combo, 0, QtCore.Qt.AlignLeft)
+        title_row.addWidget(self.tf_combo)
+        top_l.addLayout(title_row)
+
+        price_row = QtWidgets.QHBoxLayout()
+        self.price.setStyleSheet("font-size:28px; font-weight:700;")
+        self.change.setStyleSheet("font-size:12px;")
+        price_row.addWidget(self.price)
+        price_row.addWidget(self.change)
+        price_row.addStretch()
+        top_l.addLayout(price_row)
 
         layout.addWidget(top)
         layout.addWidget(self.chart, 1)
@@ -488,7 +505,7 @@ class ChartArea(QtWidgets.QFrame):
 
     def set_symbol(self, symbol: str) -> None:
         self.symbol = symbol
-        self.title.setText(f"{self._format_symbol()} · 1분봉")
+        self.title.setText(self._format_symbol())
         self._on_tf_changed()
 
     def update_snapshot(self, snap: Dict[str, Any]) -> None:
@@ -498,9 +515,7 @@ class ChartArea(QtWidgets.QFrame):
         symbol = snap.get("symbol", self.symbol)
         self.symbol = symbol
         tf_ms = snap.get("timeframe_ms")
-        tf_label = TIMEFRAME_LABELS.get(int(tf_ms), str(tf_ms)) if tf_ms else "1분"
-        self.title.setText(f"{self._format_symbol()} · {tf_label}")
-        self.title2.setText(tf_label)
+        self.title.setText(self._format_symbol())
         price = float(snap.get("price") or 0.0)
         delta = float(snap.get("price_change") or 0.0)
         pct = float(snap.get("percent_change") or 0.0)
@@ -509,7 +524,7 @@ class ChartArea(QtWidgets.QFrame):
         self.change.setText(f"{delta:,.0f} ({pct:+.2f}%) {arrow}")
         t = ThemeManager.current()
         col = t["chart-up"] if delta >= 0 else t["chart-down"]
-        self.price.setStyleSheet(f"font-size:34px; font-weight:700; color:{col};")
+        self.price.setStyleSheet(f"font-size:28px; font-weight:700; color:{col};")
         self.change.setStyleSheet(f"font-size:12px; color:{col};")
 
         candles = snap.get("candles") or []
@@ -526,8 +541,7 @@ class ChartArea(QtWidgets.QFrame):
     def apply_theme(self) -> None:
         t = ThemeManager.current()
         self.setStyleSheet(f"background:{t['bg-base']};")
-        self.title.setStyleSheet(f"font-size:11px; color:{t['text-secondary']};")
-        self.title2.setStyleSheet(f"font-size:10px; color:{t['text-quaternary']};")
+        self.title.setStyleSheet(f"font-size:13px; font-weight:600; color:{t['text-secondary']};")
         self.tf_combo.setStyleSheet(
             f"background:{t['bg-surface']}; color:{t['text-primary']}; border:1px solid {t['border-subtle']};"
             "border-radius:4px; padding:2px 6px; font-size:11px;"
@@ -614,11 +628,13 @@ class EventTimeline(QtWidgets.QFrame):
         layout.setContentsMargins(10, 8, 10, 8)
         self.title = QtWidgets.QLabel("이벤트 타임라인")
         layout.addWidget(self.title)
+        layout.setSpacing(1)
         for _ in range(5):
             lbl = QtWidgets.QLabel("-")
+            lbl.setContentsMargins(0, 0, 0, 0)
             self.items.append(lbl)
             layout.addWidget(lbl)
-        layout.addSpacing(4)
+        layout.addSpacing(2)
         legend_row = QtWidgets.QHBoxLayout()
         legend_row.addWidget(self.legend)
         for name, color in (("OK", "status-ok"), ("WARN", "status-warn"), ("FAIL", "status-fail")):
@@ -749,7 +765,6 @@ class Window1(QtWidgets.QMainWindow):
         self.engine = engine
         self.event_store = EventStore()
         self.setWindowTitle("Upbit Monitor - BTC & ETH")
-        self.alert = AlertStrip()
         self.header = HeaderBar(show_tabs=False)
         self.btc_area = ChartArea(engine, "KRW-BTC")
         self.eth_area = ChartArea(engine, "KRW-ETH")
@@ -759,7 +774,6 @@ class Window1(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.alert)
         layout.addWidget(self.header)
         split = QtWidgets.QHBoxLayout()
         split.setContentsMargins(0, 0, 0, 0)
@@ -784,7 +798,6 @@ class Window2(QtWidgets.QMainWindow):
         self.event_store = EventStore()
         self.active_symbol = "KRW-XRP"
         self.setWindowTitle("Upbit Monitor - XRP + Dashboard")
-        self.alert = AlertStrip()
         self.header = HeaderBar(show_tabs=True)
         self.xrp_area = ChartArea(engine, self.active_symbol)
         self.dashboard = DashboardPanel(self.event_store)
@@ -794,7 +807,6 @@ class Window2(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self.alert)
         layout.addWidget(self.header)
         split = QtWidgets.QHBoxLayout()
         split.setContentsMargins(0, 0, 0, 0)

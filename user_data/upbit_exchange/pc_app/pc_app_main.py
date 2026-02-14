@@ -51,8 +51,8 @@ def _update_ui(engine: MainEngine, window1: Window1, window2: Window2) -> None:
 
     window1.footer.update_status(diag, snaps)
     window2.footer.update_status(diag, snaps)
-    window1.alert.check_and_update(diag)
-    window2.alert.check_and_update(diag)
+    window1.header.check_alert(diag)
+    window2.header.check_alert(diag)
 
 
 def main() -> int:

@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:1920px; height:1080px; overflow:hidden; font-family:'Noto Sans CJK KR','Noto Sans KR',sans-serif; background:#FFFFFF; color:#1A1D24; }
+
+.header { height:48px; background:#F6F7F9; border-bottom:1px solid #E2E4E9; display:flex; align-items:center; padding:0 16px; gap:10px; }
+.header .logo { height:22px; }
+.header .label { font-size:14px; font-weight:600; color:#3D4350; }
+.chip { display:inline-flex; align-items:center; padding:0 9px; height:22px; border-radius:11px; font-size:11px; font-weight:600; white-space:nowrap; }
+.chip-ok { background:rgba(13,159,97,0.08); color:#0D9F61; }
+.spacer { flex:1; }
+.tab-group { display:flex; gap:4px; }
+.tab-btn { padding:4px 14px; border-radius:6px; font-size:12px; font-weight:600; border:1px solid #E2E4E9; background:#FFFFFF; color:#6B7280; cursor:pointer; }
+.tab-btn.active { background:#EDEEF1; color:#1A1D24; border-color:#D0D3DA; }
+.theme-label { font-size:10px; color:#9CA3AF; margin-right:4px; }
+.theme-btn { width:28px; height:28px; border-radius:6px; border:1px solid #E2E4E9; background:#FFFFFF; font-size:14px; cursor:pointer; display:flex; align-items:center; justify-content:center; color:#6B7280; }
+.alert-text { font-size:11px; font-weight:500; color:#D97706; background:rgba(217,119,6,0.07); border:1px solid rgba(217,119,6,0.14); border-radius:6px; padding:2px 10px; height:24px; display:flex; align-items:center; }
+
+.main { display:flex; height:calc(1080px - 48px - 28px); }
+.chart-pane { width:65%; display:flex; flex-direction:column; overflow:hidden; }
+.dashboard { width:35%; border-left:1px solid #E2E4E9; padding:12px 10px; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+
+.chart-header { padding:12px 16px 8px 16px; }
+.chart-title-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+.symbol-name { font-size:13px; font-weight:600; color:#3D4350; }
+.tf-select { font-size:11px; padding:3px 8px; border:1px solid #E2E4E9; border-radius:4px; background:#F6F7F9; color:#3D4350; appearance:auto; }
+.price-row { display:flex; align-items:baseline; gap:10px; }
+.price { font-size:32px; font-weight:700; line-height:1.2; }
+.price-up { color:#E54040; }
+.price-down { color:#3182F6; }
+.change { font-size:13px; font-weight:500; }
+
+.candle-area { flex:1; min-height:280px; position:relative; }
+.candle-area svg { width:100%; height:100%; }
+.volume-area { height:92px; border-top:1px solid #F0F1F4; position:relative; }
+.volume-area svg { width:100%; height:100%; }
+
+/* Dashboard */
+.kpi-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.kpi-tile { background:#F0F1F4; border:1px solid #E2E4E9; border-radius:6px; padding:10px 10px; }
+.kpi-title { font-size:10px; color:#6B7280; margin-bottom:4px; }
+.kpi-value { font-size:24px; font-weight:700; color:#1A1D24; line-height:1.2; }
+.kpi-value.ok { color:#0D9F61; }
+.kpi-sub { font-size:10px; color:#9CA3AF; margin-top:2px; }
+
+.section-box { background:#F6F7F9; border:1px solid #E2E4E9; border-radius:6px; padding:10px 10px; }
+.section-title { font-size:11px; font-weight:700; color:#1A1D24; margin-bottom:8px; }
+.conn-row { display:flex; justify-content:space-between; align-items:center; padding:4px 0; border-bottom:1px solid #F0F1F4; }
+.conn-row:last-child { border-bottom:none; }
+.conn-label { font-size:11px; color:#3D4350; }
+.conn-value { font-size:11px; font-weight:600; }
+.conn-ok { color:#0D9F61; }
+
+.timeline-box { background:#F6F7F9; border:1px solid #E2E4E9; border-radius:6px; padding:10px 10px; flex:1; display:flex; flex-direction:column; }
+.timeline-title { font-size:11px; font-weight:700; color:#1A1D24; margin-bottom:6px; }
+.timeline-item { font-size:10px; color:#3D4350; line-height:1.3; margin-bottom:1px; }
+.legend { margin-top:auto; padding-top:6px; font-size:10px; color:#6B7280; display:flex; gap:10px; }
+.legend-dot { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:3px; vertical-align:middle; }
+
+.footer { height:28px; background:#F6F7F9; border-top:1px solid #E2E4E9; display:flex; align-items:center; padding:0 16px; }
+.footer span { font-size:11px; color:#6B7280; }
+
+.grid-line { stroke:#F0F1F4; stroke-width:1; }
+.axis-label { font-size:9px; fill:#9CA3AF; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <img class="logo" src="data:image/png;base64,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" alt="Upbit">
+  <span class="label">Monitor</span>
+  <span class="chip chip-ok">● LIVE</span>
+  <span class="chip chip-ok">● WS 0.3s</span>
+  <span class="spacer"></span>
+  <span class="alert-text">⚠ 경고: WS 상태 불안정 (KRW-XRP)</span>
+  <div class="tab-group">
+    <button class="tab-btn">ETH</button>
+    <button class="tab-btn active">XRP</button>
+    <button class="tab-btn">BTC</button>
+  </div>
+  <span class="theme-label">LIGHT THEME</span>
+  <div class="theme-btn">⚙</div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <!-- XRP Chart -->
+  <div class="chart-pane">
+    <div class="chart-header">
+      <div class="chart-title-row">
+        <span class="symbol-name">XRP / KRW</span>
+        <select class="tf-select"><option>5분</option></select>
+      </div>
+      <div class="price-row">
+        <span class="price price-down">2,338</span>
+        <span class="change price-down">-9.52% ▼246</span>
+      </div>
+    </div>
+    <div class="candle-area"><svg id="xrp-candle"></svg></div>
+    <div class="volume-area"><svg id="xrp-vol"></svg></div>
+  </div>
+
+  <!-- Dashboard -->
+  <div class="dashboard">
+    <!-- KPI Tiles -->
+    <div class="kpi-grid">
+      <div class="kpi-tile">
+        <div class="kpi-title">WS 연결</div>
+        <div class="kpi-value ok">OK</div>
+        <div class="kpi-sub">3 심볼</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-title">DB Lag</div>
+        <div class="kpi-value">12ms</div>
+        <div class="kpi-sub">기준 100ms</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-title">수신 지연</div>
+        <div class="kpi-value">0.3s</div>
+        <div class="kpi-sub">avg</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-title">Reconnect</div>
+        <div class="kpi-value">0</div>
+        <div class="kpi-sub">최근 1분</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-title">수신율</div>
+        <div class="kpi-value">48/s</div>
+        <div class="kpi-sub">최근 추정</div>
+      </div>
+      <div class="kpi-tile">
+        <div class="kpi-title">에러율</div>
+        <div class="kpi-value ok">0.0%</div>
+        <div class="kpi-sub">최근 1분</div>
+      </div>
+    </div>
+
+    <!-- Connection Section -->
+    <div class="section-box">
+      <div class="section-title">커넥션 상세</div>
+      <div class="conn-row">
+        <span class="conn-label">WS ETH</span>
+        <span class="conn-value conn-ok">0.2s</span>
+      </div>
+      <div class="conn-row">
+        <span class="conn-label">WS XRP</span>
+        <span class="conn-value conn-ok">0.3s</span>
+      </div>
+      <div class="conn-row">
+        <span class="conn-label">WS BTC</span>
+        <span class="conn-value conn-ok">0.1s</span>
+      </div>
+      <div class="conn-row">
+        <span class="conn-label">DB Write</span>
+        <span class="conn-value conn-ok">정상</span>
+      </div>
+    </div>
+
+    <!-- Event Timeline -->
+    <div class="timeline-box">
+      <div class="timeline-title">이벤트 타임라인</div>
+      <div class="timeline-item">14:30:12 | KRW-XRP WS 상태 변경: WARN → OK</div>
+      <div class="timeline-item">14:28:45 | KRW-BTC 모드 변경: DB → LIVE</div>
+      <div class="timeline-item">14:25:03 | KRW-ETH WS 상태 변경: OK → WARN</div>
+      <div class="timeline-item">14:20:11 | 전체 시스템 정상 복구</div>
+      <div class="timeline-item">14:15:00 | DB Write 지연 감지 (150ms)</div>
+      <div class="legend">
+        <span>범례:</span>
+        <span><span class="legend-dot" style="background:#0D9F61;"></span>OK</span>
+        <span><span class="legend-dot" style="background:#D97706;"></span>WARN</span>
+        <span><span class="legend-dot" style="background:#C026D3;"></span>FAIL</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="footer">
+  <span>● Last Tick 0.3s | Reconnects 0 | DB Lag 12ms | Uptime 2h 15m 33s</span>
+</div>
+
+<script>
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}}
+
+function generateCandles(seed, basePrice, volatilityPct, count){
+  var rng=mulberry32(seed);
+  var candles=[];var price=basePrice;
+  for(var i=0;i<count;i++){
+    var change=(rng()-0.48)*basePrice*volatilityPct;
+    var o=price,c=price+change;
+    var h=Math.max(o,c)+rng()*Math.abs(change)*0.5;
+    var l=Math.min(o,c)-rng()*Math.abs(change)*0.5;
+    var v=rng()*0.8+0.2;
+    candles.push({o:o,h:h,l:l,c:c,v:v});
+    price=c;
+  }
+  return candles;
+}
+
+function drawCandles(svgId, candles, rightMargin){
+  var svg=document.getElementById(svgId);
+  var W=svg.clientWidth, H=svg.clientHeight;
+  var rm=rightMargin||52, bm=18;
+  var pw=W-rm, ph=H-bm;
+  var allH=candles.map(c=>c.h), allL=candles.map(c=>c.l);
+  var minP=Math.min(...allL)*0.999, maxP=Math.max(...allH)*1.001;
+  var pRange=maxP-minP||1;
+  var barW=pw/candles.length, bodyW=barW*0.7;
+  var html='';
+  for(var g=0;g<5;g++){
+    var gy=ph*g/4;
+    html+='<line x1="0" y1="'+gy+'" x2="'+pw+'" y2="'+gy+'" class="grid-line"/>';
+    var pv=maxP-(maxP-minP)*g/4;
+    html+='<text x="'+(pw+4)+'" y="'+(gy+3)+'" class="axis-label">'+formatPrice(pv)+'</text>';
+  }
+  for(var xi=0;xi<5;xi++){
+    var idx=Math.floor(xi*candles.length/5);
+    var xp=idx*barW+bodyW/2;
+    var hr=8+xi*3, mn=xi*12;
+    html+='<text x="'+xp+'" y="'+(ph+14)+'" class="axis-label" text-anchor="middle">'+pad(hr)+':'+pad(mn)+'</text>';
+  }
+  for(var i=0;i<candles.length;i++){
+    var c=candles[i], x=i*barW, up=c.c>=c.o;
+    var color=up?'#E54040':'#3182F6';
+    var wx=x+bodyW/2;
+    var yh=(1-(c.h-minP)/pRange)*ph;
+    var yl=(1-(c.l-minP)/pRange)*ph;
+    var yo=(1-(c.o-minP)/pRange)*ph;
+    var yc=(1-(c.c-minP)/pRange)*ph;
+    var bt=Math.min(yo,yc), bh=Math.max(Math.abs(yc-yo),1);
+    html+='<line x1="'+wx.toFixed(1)+'" y1="'+yh.toFixed(1)+'" x2="'+wx.toFixed(1)+'" y2="'+yl.toFixed(1)+'" stroke="'+color+'" stroke-width="1"/>';
+    html+='<rect x="'+x.toFixed(1)+'" y="'+bt.toFixed(1)+'" width="'+bodyW.toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="'+color+'"/>';
+  }
+  svg.innerHTML=html;
+}
+
+function drawVolume(svgId, candles, rightMargin){
+  var svg=document.getElementById(svgId);
+  var W=svg.clientWidth, H=svg.clientHeight;
+  var rm=rightMargin||52, pw=W-rm, ph=H-4;
+  var barW=pw/candles.length, bodyW=barW*0.7;
+  var maxV=Math.max(...candles.map(c=>c.v));
+  var html='';
+  for(var g=0;g<3;g++){
+    var gy=ph*g/2;
+    html+='<line x1="0" y1="'+gy+'" x2="'+pw+'" y2="'+gy+'" class="grid-line"/>';
+  }
+  for(var i=0;i<candles.length;i++){
+    var c=candles[i], x=i*barW, up=c.c>=c.o;
+    var color=up?'#E54040':'#3182F6';
+    var bh=(c.v/maxV)*ph;
+    html+='<rect x="'+x.toFixed(1)+'" y="'+(ph-bh).toFixed(1)+'" width="'+bodyW.toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="'+color+'" opacity="0.6"/>';
+  }
+  svg.innerHTML=html;
+}
+
+function formatPrice(p){
+  if(p>=1000000) return (p/1000000).toFixed(1)+'M';
+  if(p>=1000) return (p/1000).toFixed(1)+'K';
+  return p.toFixed(0);
+}
+function pad(n){return n<10?'0'+n:''+n;}
+
+var xrpCandles=generateCandles(99, 2580, 0.015, 60);
+drawCandles('xrp-candle', xrpCandles);
+drawVolume('xrp-vol', xrpCandles);
+</script>
+</body>
+</html>
