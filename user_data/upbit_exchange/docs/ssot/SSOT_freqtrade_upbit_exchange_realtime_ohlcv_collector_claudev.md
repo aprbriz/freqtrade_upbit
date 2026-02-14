@@ -1,9 +1,9 @@
 # 업비트 실시간 OHLCV 수집기 + PC 차트 앱 - SSOT (Single Source of Truth)
 
 **프로젝트**: Freqtrade_upbit Real-time OHLCV Collector + PC Chart App  
-**버전**: v3.3 (diff-최소(=변경리스크 최소) 가드레일 + PC 앱 Light/Dark 테마 규칙 추가)  
+**버전**: v3.4 (SSOT 간소화 - 히스토리 분리)  
 **생성일**: 2026-01-26  
-**최종 업데이트**: 2026-02-12  
+**최종 업데이트**: 2026-02-14  
 
 ---
 
@@ -26,17 +26,11 @@ upbit_exchange/
 
 
 ### 🚧 Phase 2: Cloud Collector 고도화 (구현 대기)
-- CollectorManager + Short/Mid/Long 분리
-- DB 파일 분리 (short/10s_1m/10m)
-- DerivedTimeframeAggregator (메모리 전용)
-- config/CLI/HTTP/통계
+- CollectorManager + Short/Mid/Long 분리, DB 파일 분리, Derived 메모리 전용, config/CLI/HTTP
 
-### 🚧 Phase 2.5: PC 차트 앱 (설계 완료 ✅, 구현 대기)
-- **듀얼 모니터 UI** 설계 확정 (DEC-015)
-- **Raw Trade WebSocket 최적화** 설계 확정 (DEC-016)
-- DB + LIVE 오버레이 병합 설계
-- BURST 감지 및 자동 전환
-- Upbit 유사 스타일 UI
+### ✅ Phase 2.5: PC 차트 앱 (구현 완료, 2026-02-12)
+- Window1(BTC+ETH) + Window2(XRP+Dashboard) 듀얼 창, Light/Dark 테마, Raw Trade WS, 초기 DB 로드
+- **참조**: `docs/DUAL_WINDOW_UI_REDESIGN_WORK_ORDER_UPDATED.md`
 
 ---
 
@@ -213,21 +207,12 @@ upbit_exchange/
 - [ ] 중복 제거, 전역 레이트리밋, DB 재시도
 - [ ] 큐 오버로드 보호
 
-### Phase 2.5 PC 앱 구현 대기 🚧
-- [ ] MainEngine (WS + Aggregation + BURST 감지)
-- [ ] 듀얼 모니터 UI (Window1: XRP+BTC, Window2: ETH+진단패널)
-- [ ] DB_ONLY / LIVE_WARMUP / LIVE_ACTIVE / LIVE_COOLDOWN 상태머신
-- [ ] Raw Trade 단일 구독 (3개 심볼)
-- [ ] 로컬 Aggregation (common/MultiAggregator 재사용)
-- [ ] cutover_ts 기반 병합
-- [ ] context_id/generation_id 격리
-- [ ] BURST 감지 (2단계 게이트 + 히스테리시스)
-- [ ] WS 재연결 (backoff/jitter/cooldown)
-- [ ] coalesce + 하단 티커
-- [ ] 통합 진단 패널 (3개 심볼 상태)
-- [ ] Upbit 유사 UI 스타일 (dual-chart-monitor.html 기준)
-- [ ] config.json, 로그 로테이션
-- [ ] 듀얼 모니터 핫플러그 대응
+### Phase 2.5 PC 앱 ✅ 기본 구현 완료 (2026-02-12)
+- [x] MainEngine (WS + Aggregation), 듀얼 창(BTC+ETH / XRP+Dashboard)
+- [x] 초기 DB 로드, Raw Trade 구독, 차트/거래량 축 표시
+- [x] Light/Dark 테마 토큰 시스템, 상태 칩, KPI/커넥션/이벤트 대시보드
+- [ ] **Pending**: BURST 감지, cutover_ts 병합, WS 재연결 backoff, coalesce/decimation
+- **참조**: `docs/DUAL_WINDOW_UI_REDESIGN_WORK_ORDER_UPDATED.md`
 - [ ] **Light/Dark 테마 토글 + 토큰 시스템 적용** (DEC-027)
 - [ ] **상승=빨강 / 하락=파랑 유지 + 경고/장애 의미 분리** (DEC-027)
 
@@ -276,107 +261,19 @@ upbit_exchange/
 ### DEC-001~010: ✅ 확정 (update_history.txt)
 - SQLite WAL, 배치100, 틱봉 음수, 9시간 재연결, 무제한 재연결
 
-### DEC-011: Phase 2 DB 마이그레이션 (P2-001)
-- ohlcv.sqlite → ohlcv_short.sqlite (일회성 rename)
-- 안전장치: 기존 파일 보호, 실패 시 fail-fast
+### DEC-011~014: Phase 2 Cloud 핵심 정책 ✅
+- **DEC-011**: DB 마이그레이션 (ohlcv.sqlite → ohlcv_short.sqlite 일회성 rename)
+- **DEC-012**: 중복 제거 (trade_uuid → sequential_id → fallback 5-tuple)
+- **DEC-013**: 큐 오버로드 격리/회복 (HIGH_WATERMARK → DEGRADED, HARD_LIMIT → 연결 종료)
+- **DEC-014**: 디렉토리 구조 분리 (common/cloud/pc_app)
 
-### DEC-012: 중복 제거 우선순위 (P2-002)
-- trade_uuid → sequential_id → fallback 5-tuple
-- 런타임 필드 존재 확인
-
-### DEC-013: 큐 오버로드 격리/회복 (P2-003)
-- HIGH_WATERMARK: DEGRADED + 백프레셔
-- HARD_LIMIT: 의도적 연결 종료 → 쿨다운 → 재연결
-- drop 우선이 아닌 격리/회복 중심
-
-### DEC-014: 디렉토리 구조 분리 ✅
-- common/cloud/pc_app 구조로 코드 재사용성/유지보수성 향상
-- 상태: ✅ 확정 (2026-01-28)
-
-### DEC-015: PC 앱 듀얼 모니터 UI (Phase 2.5) ✅
-- **듀얼 모니터 기본 전제**
-- 모니터 1: BTC + ETH 듀얼 차트 (50:50)
-- 모니터 2: XRP 차트 (80%) + 통합 진단 패널 (20%)
-- 단일 프로세스, 2개 독립 창, PyQt5/PySide6
-- 단일 모니터 환경 시 자동 폴백 (탭/스택 모드)
-- **이유**: 트레이딩 효율성, 동시 모니터링, 진단 정보 통합
-- **상태**: ✅ 설계 확정 (2026-01-28)
-- **참조**: `pc_app/DESIGN_DUAL_MONITOR.md`
-
-### DEC-016: PC 앱 WebSocket 최적화 (Phase 2.5) ✅
-- **Raw trade 단일 구독 방식** (구독 수 항상 3개 고정)
-- **로컬 Aggregation** (common/MultiAggregator 재사용)
-- **타임프레임 변경 시 WS 재구독 불필요** (0.1초 전환)
-- **"Active + Previous" 정책 폐기** (TTL 불필요)
-- **메모리**: 3 심볼 × 5 타임프레임 × 1000 캔들 = 약 1.5 MB (+1 MB)
-- **이유**: 구독 수 감소, 전환 로직 단순화, Upbit 레이트리밋 안정성
-- **상태**: ✅ 설계 확정 (2026-01-28)
-- **참조**: `pc_app/WEBSOCKET_OPTIMIZATION.md`
-
-### DEC-017: PC 앱 common/ 재사용 방식 (Phase 2.5) ✅
-- **vendor 복사 방식** 권장 (pc_app/vendor/)
-- **직접 참조 금지** (sys.path 조작 금지)
-- **이유**: 환경 격리, 배포 단순화, 수정 영향 최소화
-- **대상**: tick_aggregator.py, timeframe_aggregator.py, 순수 계산 로직만
-- **금지**: asyncio, OS 종속 로직, Cloud collector 수정
-- **상태**: ✅ 원칙 확정 (2026-01-28)
-
-### DEC-018: PC 앱 설정 파일/로그 로테이션 (Phase 2.5) ✅
-- **설정 파일**: config.json (실행 경로 우선, %APPDATA% 대안)
-- **로그 로테이션**: maxBytes=50MB, backupCount=5
-- **로그 위치**: %LOCALAPPDATA%/UpbitRealTimeChart/logs/app.log
-- **이유**: 하드코딩 방지, 24/7 무한 증가 방지
-- **상태**: ✅ 원칙 확정 (2026-01-28)
-
-### DEC-019: PC 앱 SQLite 접근 가정 (Phase 2.5) ✅
-- **로컬 복사본만** (네트워크 공유 SQLite 금지)
-- **mode=ro + immutable=1** (읽기 전용 강제)
-- **동기화**: 사용자 책임 (rsync, scp 등)
-- **이유**: 락/파일깨짐 위험, WAL 충돌 방지
-- **상태**: ✅ 원칙 확정 (2026-01-28)
-
-### DEC-020: PC 앱 BURST 계산 기준 (Phase 2.5) ✅
-- **trade_ts_ms 기반** (Upbit 제공 timestamp)
-- **로컬 수신 시각 금지** (네트워크 지연 오탐 방지)
-- **진단용**: recv_rate 별도 계산 (UI 표기)
-- **상태 전이**: trade_ts_ms 우선
-- **이유**: 시간 기반 윈도우 정확성, 틱 몰림 오탐 방지
-- **상태**: ✅ 원칙 확정 (2026-01-28)
-
-### DEC-021: PC 앱 Hybrid 레벨 정의 (Phase 2.5) ✅
-- **레벨 1**: Python-only + decimation
-- **레벨 2**: Hybrid-lite (핫루프만 C++, UI는 Python/PyQt)
-- **레벨 3**: Full-native (UI까지 Qt C++)
-- **목표**: 레벨 2 (Hybrid-lite)
-- **시작**: 레벨 1 → 프로파일링 → 병목 확인 → 레벨 2
-- **C++ 범위**: (1) 집계 핫루프, (2) ring buffer/큐, (3) 스냅샷 생성
-- **UI**: Python/PyQt 유지
-- **이유**: 실측 기반 최적화, YAGNI 원칙
-- **상태**: ✅ 원칙 확정 (2026-01-28)
-
-### DEC-022: PC 앱 봉 확정 규칙 (Phase 2.5) ✅
-- **시간봉**: "다음 구간 첫 틱 도착 시" 직전 봉 FINAL 확정
-- **타이머 기반 금지** (벽시계 자동 닫힘 금지)
-- **3틱봉**: 3번째 틱에서 FINAL + 다음 봉 시작
-- **이유**: 데이터 정합성 (경합 조건 없음), 거래소 timestamp 우선
-- **단점 인지**: 거래 없으면 확정 안 됨 (BTC/ETH/XRP는 유동성 충분)
-- **상태**: ✅ 확정 (2026-01-28)
-
-### DEC-023: PC 앱 Upbit WS 레이트리밋 (Phase 2.5) ✅
-- **연결**: 초당 최대 5회
-- **구독**: 초당 최대 5회 + 분당 100회
-- **구현**: rate limiter로 송신 폭주 방지
-- **위반 시**: 계정 제재 가능
-- **상태**: ✅ 필수 확정 (2026-01-28)
-
-### DEC-024: PC 앱 비상모드 정책 (Phase 2.5) ✅
-- **A (틱 드랍 유지) 금지**
-- **C + B 동시 직행**:
-  - C) 메시지창 (확인 버튼 + 5초 후 자동 닫힘)
-  - B) 즉시 DB_ONLY 강제 전환
-- **이후**: 자동 LIVE 재진입 금지 (사용자 버튼만)
-- **이유**: 정확성 우선, 캔들 희생 방지
-- **상태**: ✅ 확정 (2026-01-28)
+### DEC-015~024: PC 앱 핵심 설계 ✅ (2026-01-28 확정)
+- **DEC-015**: 듀얼 모니터 UI (W1: BTC+ETH 50:50, W2: XRP+Dashboard 65:35)
+- **DEC-016**: Raw Trade 단일 구독 + 로컬 Aggregation (구독 수 3개 고정)
+- **DEC-017~019**: vendor 복사, config.json, SQLite RO
+- **DEC-020~022**: BURST trade_ts 기준, Hybrid 레벨 1→2, 봉 확정 규칙
+- **DEC-023~024**: Upbit 레이트리밋, 비상모드 DB 강제 전환
+- **상세**: `pc_app/DESIGN_DUAL_MONITOR.md`, `WEBSOCKET_OPTIMIZATION.md`
 
 ### DEC-025: Phase 2 테이블 분리(타임프레임별) ✅
 - **규칙**: ohlcv_{QUOTE}_{BASE}_tf{timeframe_ms}
@@ -1039,70 +936,26 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 ### 단기 (Phase 2 완료 후)
 - P2-REQ로 흡수됨
 
-### 중기 (1개월)
-- BL-006: PC 차트 앱 구현 완료 (Phase 2.5)
-- BL-007: freqtrade Web UI 연동
-- BL-008: Android 2채널 알람 앱
+### 중기
+- PC 앱 Pending 기능 (BURST, cutover, 재연결 강화)
+- freqtrade Web UI 연동, Android 알람 앱
 
-### 장기 (3개월+)
-- BL-009: REST API, 데이터 조회
-- BL-010: CSV/Parquet 내보내기
-- BL-011: 데이터 분석
-- BL-012: 실시간 알림 (확장)
+### 장기
+- REST API, CSV/Parquet 내보내기, 데이터 분석
 
 ---
 
 ## 🔄 UPDATE HISTORY
 
-### v3.3 - 2026-02-12 (diff-최소 가드레일 + 테마 규칙 추가)
-- IR-006 추가: diff 최소 = 변경리스크 최소(기능 축소/스펙 삭제 금지, AC 우선)
-- DEC-026 추가: diff-최소 운용 규칙 확정
-- DEC-027 추가: PC 앱 Light/Dark 테마 토큰 규칙 + 가격색(빨강/파랑) 확정 의미 분리
-- AC-PC-001/002 및 DoD/Backlog에 테마 항목 추가
-- RISK-PC-006 추가: 라이트 테마 가독성/계층 붕괴 리스크 및 완화
+**상세 변경 이력**: `ssot_update_history.md` 참조
 
-### v3.2 - 2026-02-01 (PC 앱 UI 보강)
-- ETH 창 UI를 trading-monitor.jsx 기준으로 보강
-- 차트/거래량 축과 좌표 숫자 표시 추가
-- 초기 DB 로드로 캔들 폭 ~3px 유지
-- 진단 패널 버튼(LIVE/DB) 동작 연결
-- 상단 네비게이션 바 제거 (ETH 창)
-
-### v3.1 - 2026-01-28 (Phase 2 P0 안정화 반영)
-- DEC-025: 타임프레임별 테이블 분리 확정 (PK 충돌 제거)
-- flush_timer 종료 레이스 제거 정책 반영 (cancel + idle wait + 재스케줄 차단)
-- unfinished_tasks 비공개 API 제거 정책 반영
-- Cloud 로그 경로를 프로젝트 루트 logs/로 고정
-
-### v3.0 - 2026-01-28 (Phase 2.5 PC 앱 전체 명세 추가)
-- PC 앱 Objective, 아키텍처, 핵심 기능 전체 상세 명세
-- 듀얼 모니터 UI, Raw Trade WebSocket, BURST 감지, LIVE 오버레이, WS 재연결, UI 렌더링, 차트 표현, UI 스타일, DB 조회, 로깅, 설정, SQLite 접근, common/ 재사용, Hybrid, 스레드 분리, Android 알람 설계
-- DEC-015~024 추가 (PC 앱 관련 결정 10개)
-- AC-PC-001~005 추가 (PC 앱 Acceptance Criteria)
-- BL-PC-001~010 추가 (PC 앱 구현 백로그)
-- 목적: 작업지시서(1213줄) 기반 SSOT 상세화, PC 앱 설계 완전 문서화
-- SSOT 라인 수: 345 → 약 800+ 줄
-
-### v2.4 - 2026-01-28 (Phase 2.5 PC 앱 설계 추가)
-- DEC-015: 듀얼 모니터 UI 설계 확정
-- DEC-016: Raw Trade WebSocket 최적화 설계 확정
-- BL-PC-001~004: PC 앱 구현 백로그 추가
-- 목적: PC 차트 앱 설계 문서화, Phase 2.5 준비
-
-### v2.3 - 2026-01-28 (SSOT 간소화)
-- Phase 2 정책/요구사항 핵심만 간소화
-- 완료된 사항 요약 처리
-- 목적: Phase 2 구현 집중, 파일 크기 축소
-
-### v2.2 - 2026-01-28 (디렉토리 리팩토링)
-- DEC-014: common/cloud/pc_app 구조 분리
-- 목적: 유지보수성, PC 앱 준비
-
-### v2.1 - 2026-01-28 (SSOT 간소화)
-- Phase 0/1 완료 내용 → update_history.txt
-
-### v2.0 - 2026-01-27 (Phase 2 명세 확정)
-- POL-001~013, P2-REQ-001~012
+**최근 주요 변경**:
+- v3.3 (2026-02-12): diff-최소 가드레일 + PC 앱 Light/Dark 테마 규칙
+- v3.2 (2026-02-01): PC 앱 UI 보강 (축/좌표/DB 로드)
+- v3.1 (2026-01-28): Phase 2 P0 안정화 (PK 분리/flush 레이스/비공개 API)
+- v3.0 (2026-01-28): Phase 2.5 PC 앱 전체 명세 추가
+- v2.0~v2.4: Phase 2 명세/리팩토링/간소화
+- Phase 0/1 상세: `update_history.txt`
 
 ---
 
@@ -1137,60 +990,48 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 
 ### 실행
 
-**Cloud (Phase 2 구현 후):**
+**Cloud (Phase 2):**
 ```bash
 python collector.py                         # 기본
 python collector.py --pairs KRW-BTC,KRW-ETH # pair 지정
 python collector.py --http-port 8000        # HTTP 활성화
-PC 앱 (Phase 2.5 구현 후):
+```
 
-python pc_app_main.py  # 기본 실행
-# config.json에서 설정 로드
-종료
-Cloud:
+**PC 앱 (Phase 2.5):**
+```bash
+python pc_app_main.py  # config.json 기반 실행
+```
 
-Ctrl+C (5초 이내 안전 종료)
+### 종료
 
-PC 앱:
+**Cloud**: Ctrl+C (5초 이내 graceful shutdown)  
+**PC 앱**: 창 닫기 (스레드/소켓 정리)
 
-창 닫기 또는 종료 버튼
+### 운영
 
-graceful shutdown (스레드/소켓 정리)
+**Cloud**: 24시간+ 무중단, 9시간 주기 재연결, 로그 `logs/collector.log`  
+**PC 앱**: LIVE 모드 일시적, DB는 Cloud 동기화, 로그 `%LOCALAPPDATA%/UpbitRealTimeChart/logs/app.log`
 
-운영
-Cloud:
+---
 
-24시간+ 무중단 가능 ✅
+## 📚 참조 문서
 
-로그: tail -f logs/collector.log
+**Cloud (Phase 2)**
+- `update_history.txt` (Phase 0/1 상세 이력)
 
-9시간 자동 재연결
+**PC 앱 (Phase 2.5)**
+- `pc_app/README.md`
+- `pc_app/DESIGN_DUAL_MONITOR.md`
+- `pc_app/WEBSOCKET_OPTIMIZATION.md`
+- `docs/DUAL_WINDOW_UI_REDESIGN_WORK_ORDER_UPDATED.md` (최신 UI 작업지시서)
 
-PC 앱:
+**변경 이력**
+- `ssot_update_history.md` (SSOT 업데이트 이력)
 
-노트북/PC 켜진 동안만 LIVE
+---
 
-DB는 Cloud에서 주기적 동기화
-
-설정: config.json
-
-로그: %LOCALAPPDATA%/UpbitRealTimeChart/logs/app.log
-
-📚 참조 문서
-Cloud (Phase 2)
-update_history.txt (Phase 0/1 상세 이력)
-
-PC 앱 (Phase 2.5)
-pc_app/README.md
-pc_app/DESIGN_DUAL_MONITOR.md (듀얼 모니터 상세 설계)
-pc_app/WEBSOCKET_OPTIMIZATION.md (WebSocket 최적화 상세)
-pc_app/WEBSOCKET_STRATEGY.md (v2.0)
-pc_app/DUAL_MONITOR_SUMMARY.md (변경 요약)
-user_data/upbit_exchange_memo/dual-chart-monitor.html (UI 프로토타입)
-user_data/upbit_exchange_memo/phase2 작업시지서.md.md (전체 작업지시서)
-
-마지막 업데이트: 2026-02-12 (v3.3)
-다음 단계: Phase 2 v2.0 구현 → 24시간 검증 → Phase 2.5 PC 앱 구현
-상태: Phase 2 구현 대기 🚧, Phase 2.5 설계 완료 ✅
+**마지막 업데이트**: 2026-02-14 (v3.4)  
+**다음 단계**: PC 앱 Pending 기능 (BURST/cutover/재연결) → Phase 2 Cloud 구현  
+**상태**: Phase 2 구현 대기 🚧, Phase 2.5 기본 완료 ✅
 
 ::contentReference[oaicite:0]{index=0}
