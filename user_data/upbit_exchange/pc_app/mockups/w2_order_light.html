@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, initial-scale=1.0">
+    <title>Upbit Monitor - Window 2 - Light Theme</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background: #FFFFFF;
+            color: #1A1D24;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Header */
+        .header {
+            height: 48px;
+            background: #F6F7F9;
+            border-bottom: 1px solid #E2E4E9;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            justify-content: space-between;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo {
+            height: 32px;
+        }
+
+        .monitor-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: #3D4350;
+        }
+
+        .status-chips {
+            display: flex;
+            gap: 8px;
+            margin-left: 16px;
+        }
+
+        .chip {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .chip.live {
+            background: #D1FAE5;
+            color: #0D9F61;
+        }
+
+        .chip.ws {
+            background: #D1FAE5;
+            color: #0D9F61;
+        }
+
+        .chip.lag {
+            background: #FEF3C7;
+            color: #D97706;
+        }
+
+        .header-center {
+            flex: 1;
+            text-align: center;
+            font-size: 13px;
+            color: #D97706;
+            font-weight: 500;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tab-btn {
+            padding: 6px 12px;
+            border: 1px solid #E2E4E9;
+            background: #FFFFFF;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            font-weight: 500;
+            color: #3D4350;
+            transition: all 0.2s;
+        }
+
+        .tab-btn.up {
+            color: #E54040;
+        }
+
+        .tab-btn.down {
+            color: #3182F6;
+        }
+
+        .tab-btn.active {
+            background: #3182F6;
+            color: #FFFFFF;
+            border-color: #3182F6;
+        }
+
+        .settings-btn {
+            width: 32px;
+            height: 32px;
+            border: 1px solid #E2E4E9;
+            background: #FFFFFF;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        /* Main area */
+        .main-area {
+            display: flex;
+            height: calc(1080px - 48px - 28px);
+        }
+
+        /* Left column - Chart */
+        .left-column {
+            width: 52%;
+            background: #FFFFFF;
+            border-right: 1px solid #E2E4E9;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chart-header {
+            height: 40px;
+            padding: 0 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #E2E4E9;
+        }
+
+        .chart-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .chart-title-text {
+            font-size: 13px;
+            color: #6B7280;
+            font-weight: 500;
+        }
+
+        .chart-price {
+            font-size: 18px;
+            font-weight: 700;
+            color: #3182F6;
+        }
+
+        .chart-change {
+            font-size: 13px;
+            color: #3182F6;
+            font-weight: 500;
+        }
+
+        .timeframe-select {
+            padding: 4px 8px;
+            border: 1px solid #E2E4E9;
+            border-radius: 4px;
+            font-size: 12px;
+            background: #FFFFFF;
+            color: #3D4350;
+        }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            padding: 16px;
+        }
+
+        #candlestick-chart {
+            width: 100%;
+            height: calc(100% - 92px);
+        }
+
+        #volume-chart {
+            width: 100%;
+            height: 92px;
+            margin-top: 8px;
+        }
+
+        /* Middle column - Order Panel */
+        .middle-column {
+            width: 24%;
+            background: #F6F7F9;
+            border-right: 1px solid #E2E4E9;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .order-tabs {
+            height: 36px;
+            display: flex;
+            border-bottom: 1px solid #E2E4E9;
+            background: #FFFFFF;
+        }
+
+        .order-tab {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 500;
+            color: #6B7280;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+
+        .order-tab.active {
+            color: #3182F6;
+            border-bottom-color: #3182F6;
+        }
+
+        .order-content {
+            flex: 1;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .order-buttons {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .order-side-btn {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .order-side-btn.buy {
+            background: #FECACA;
+            color: #E54040;
+        }
+
+        .order-side-btn.sell {
+            background: #F0F1F4;
+            color: #6B7280;
+        }
+
+        .input-group {
+            margin-bottom: 12px;
+        }
+
+        .input-label {
+            font-size: 11px;
+            color: #6B7280;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .input-field {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #E2E4E9;
+            border-radius: 6px;
+            font-size: 13px;
+            background: #FFFFFF;
+            color: #1A1D24;
+        }
+
+        .percentage-buttons {
+            display: flex;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        .percentage-btn {
+            flex: 1;
+            padding: 6px;
+            border: 1px solid #E2E4E9;
+            background: #FFFFFF;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            color: #6B7280;
+        }
+
+        .warning-box {
+            background: #FEF3C7;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            color: #D97706;
+            margin-bottom: 12px;
+        }
+
+        .green-box {
+            background: #D1FAE5;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+        }
+
+        .green-box-title {
+            font-size: 11px;
+            color: #0D9F61;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .green-box-content {
+            font-size: 10px;
+            color: #0D9F61;
+            line-height: 1.4;
+        }
+
+        .order-settings {
+            margin-bottom: 12px;
+        }
+
+        .order-settings-title {
+            font-size: 11px;
+            color: #6B7280;
+            margin-bottom: 4px;
+        }
+
+        .order-settings-value {
+            font-size: 11px;
+            color: #3D4350;
+            font-weight: 500;
+        }
+
+        .confirm-btn {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #E2E4E9;
+            background: #FFFFFF;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            color: #6B7280;
+            margin-bottom: 12px;
+        }
+
+        .order-submit-container {
+            position: absolute;
+            top: 50%;
+            left: 16px;
+            right: 16px;
+            transform: translateY(-50%);
+            z-index: 10;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            background: #E54040;
+            color: #FFFFFF;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(229, 64, 64, 0.3);
+        }
+
+        .last-tick-info {
+            margin-top: auto;
+            padding-top: 12px;
+            border-top: 1px solid #E2E4E9;
+            font-size: 10px;
+            color: #9CA3AF;
+        }
+
+        /* Right column - Dashboard */
+        .right-column {
+            width: 24%;
+            background: #F6F7F9;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .kpi-tile {
+            background: #FFFFFF;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #E2E4E9;
+        }
+
+        .kpi-label {
+            font-size: 10px;
+            color: #9CA3AF;
+            margin-bottom: 4px;
+        }
+
+        .kpi-value {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .kpi-value.ok {
+            color: #0D9F61;
+        }
+
+        .kpi-value.warn {
+            color: #D97706;
+        }
+
+        .kpi-value.normal {
+            color: #3D4350;
+        }
+
+        .connection-section {
+            background: #FFFFFF;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #E2E4E9;
+            margin-bottom: 16px;
+        }
+
+        .connection-title {
+            font-size: 11px;
+            color: #6B7280;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .connection-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            font-size: 11px;
+        }
+
+        .connection-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .connection-name {
+            color: #6B7280;
+        }
+
+        .connection-status {
+            font-weight: 500;
+        }
+
+        .connection-status.ok {
+            color: #0D9F61;
+        }
+
+        .connection-status.warn {
+            color: #D97706;
+        }
+
+        .event-timeline {
+            background: #FFFFFF;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #E2E4E9;
+        }
+
+        .event-timeline-title {
+            font-size: 11px;
+            color: #6B7280;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .event-item {
+            margin-bottom: 1px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            line-height: 1.3;
+        }
+
+        .event-item.normal {
+            background: #F6F7F9;
+            color: #3D4350;
+        }
+
+        .event-item.warn {
+            background: #FECACA;
+            color: #E54040;
+        }
+
+        .event-time {
+            color: #9CA3AF;
+            font-weight: 500;
+        }
+
+        /* Footer */
+        .footer {
+            height: 28px;
+            background: #F6F7F9;
+            border-top: 1px solid #E2E4E9;
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            font-size: 11px;
+            color: #6B7280;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <img src="data:image/png;base64,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" alt="Upbit" class="logo">
+            <span class="monitor-label">Monitor</span>
+            <div class="status-chips">
+                <div class="chip live">● LIVE</div>
+                <div class="chip ws">● WS 0.8s</div>
+                <div class="chip lag">● DB LAG</div>
+            </div>
+        </div>
+        <div class="header-center">
+            ⚠ DB Write Lag 120ms — 기준(100ms) 초과
+        </div>
+        <div class="header-right">
+            <button class="tab-btn up">ETH 3,432,000 +0.57%</button>
+            <button class="tab-btn down active">XRP 2,364 -0.26%</button>
+            <button class="tab-btn up">BTC 114,451K +0.80%</button>
+            <button class="settings-btn">⚙</button>
+        </div>
+    </div>
+
+    <!-- Main area -->
+    <div class="main-area">
+        <!-- Left column - Chart -->
+        <div class="left-column">
+            <div class="chart-header">
+                <div class="chart-title">
+                    <span class="chart-title-text">XRP / KRW · 1분</span>
+                    <span class="chart-price">2,364</span>
+                    <span class="chart-change">▼6 (-0.26%)</span>
+                </div>
+                <select class="timeframe-select">
+                    <option>1분</option>
+                    <option>3분</option>
+                    <option>5분</option>
+                    <option>15분</option>
+                </select>
+            </div>
+            <div class="chart-container">
+                <canvas id="candlestick-chart"></canvas>
+                <canvas id="volume-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Middle column - Order Panel -->
+        <div class="middle-column">
+            <div class="order-tabs">
+                <div class="order-tab active">지정가</div>
+                <div class="order-tab">시장가</div>
+                <div class="order-tab">예약 주문</div>
+            </div>
+            <div class="order-content">
+                <div class="order-buttons">
+                    <button class="order-side-btn buy">BUY</button>
+                    <button class="order-side-btn sell">SELL</button>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">주문가격 (KRW)</label>
+                    <input type="text" class="input-field" value="2,364">
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">수량 (XRP)</label>
+                    <input type="text" class="input-field" value="42.3">
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">주문총액 (KRW)</label>
+                    <input type="text" class="input-field" value="99,997">
+                </div>
+
+                <div class="percentage-buttons">
+                    <button class="percentage-btn">25%</button>
+                    <button class="percentage-btn">50%</button>
+                    <button class="percentage-btn">75%</button>
+                    <button class="percentage-btn">100%</button>
+                </div>
+
+                <div class="warning-box">
+                    수수료: ±0.1% (수익 포함)
+                </div>
+
+                <div class="green-box">
+                    <div class="green-box-title">최근체결 DEC-33</div>
+                    <div class="green-box-content">
+                        매수: 2,364 KRW × 42.3 XRP<br>
+                        체결시각: 14:31:45<br>
+                        수수료: 100 KRW
+                    </div>
+                </div>
+
+                <div class="order-settings">
+                    <div class="order-settings-title">주문 설정</div>
+                    <div class="order-settings-value">고급: idempotency OK</div>
+                </div>
+
+                <button class="confirm-btn">주문수 확인</button>
+
+                <div class="last-tick-info">
+                    Last Tick: 0.3s ago · Price 2,364 KRW<br>
+                    Volume: 142.3M KRW (1min)
+                </div>
+
+                <div class="order-submit-container">
+                    <button class="submit-btn">주문 하기</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right column - Dashboard -->
+        <div class="right-column">
+            <div class="kpi-grid">
+                <div class="kpi-tile">
+                    <div class="kpi-label">WS 연결</div>
+                    <div class="kpi-value ok">OK</div>
+                </div>
+                <div class="kpi-tile">
+                    <div class="kpi-label">DB Lag</div>
+                    <div class="kpi-value warn">120ms</div>
+                </div>
+                <div class="kpi-tile">
+                    <div class="kpi-label">지연</div>
+                    <div class="kpi-value normal">0.3s</div>
+                </div>
+                <div class="kpi-tile">
+                    <div class="kpi-label">Reconn</div>
+                    <div class="kpi-value normal">0</div>
+                </div>
+                <div class="kpi-tile">
+                    <div class="kpi-label">수신</div>
+                    <div class="kpi-value normal">42/s</div>
+                </div>
+                <div class="kpi-tile">
+                    <div class="kpi-label">에러율</div>
+                    <div class="kpi-value normal">0.0%</div>
+                </div>
+            </div>
+
+            <div class="connection-section">
+                <div class="connection-title">연결 상태</div>
+                <div class="connection-item">
+                    <span class="connection-name">WS ETH</span>
+                    <span class="connection-status ok">✅ 23ms</span>
+                </div>
+                <div class="connection-item">
+                    <span class="connection-name">OPS XRP</span>
+                    <span class="connection-status ok">✅ 18ms</span>
+                </div>
+                <div class="connection-item">
+                    <span class="connection-name">WAS NYC</span>
+                    <span class="connection-status ok">✅ 16+s</span>
+                </div>
+                <div class="connection-item">
+                    <span class="connection-name">SER WORK...</span>
+                    <span class="connection-status warn">⚠</span>
+                </div>
+            </div>
+
+            <div class="event-timeline">
+                <div class="event-timeline-title">이벤트 타임라인</div>
+                <div class="event-item normal">
+                    <span class="event-time">14:32:07</span> DB lag 120ms 초과
+                </div>
+                <div class="event-item normal">
+                    <span class="event-time">14:31:55</span> ETH reconn OK
+                </div>
+                <div class="event-item warn">
+                    <span class="event-time">14:31:54</span> ETH 연결 끊김
+                </div>
+                <div class="event-item normal">
+                    <span class="event-time">14:30:00</span> 시스템 시작
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+        ● Last Tick 0.3s | Reconnects 0 | DB Lag 120ms | Uptime 2m 09s
+    </div>
+
+    <script>
+        // Seeded PRNG (mulberry32)
+        function mulberry32(a) {
+            return function() {
+                let t = a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
+
+        const rng = mulberry32(12345);
+
+        // Generate candlestick data
+        function generateCandlestickData(count, basePrice, trend = 'down') {
+            const data = [];
+            let currentPrice = basePrice;
+
+            for (let i = 0; i < count; i++) {
+                const trendFactor = trend === 'down' ? -0.002 : 0.002;
+                const drift = currentPrice * trendFactor;
+                const volatility = currentPrice * 0.008;
+
+                const open = currentPrice;
+                const change = (rng() - 0.5) * volatility + drift;
+                const close = open + change;
+                const high = Math.max(open, close) + rng() * volatility * 0.5;
+                const low = Math.min(open, close) - rng() * volatility * 0.5;
+                const volume = (rng() * 500000 + 100000);
+
+                data.push({ open, high, low, close, volume });
+                currentPrice = close;
+            }
+
+            return data;
+        }
+
+        // Draw candlestick chart
+        function drawCandlestickChart() {
+            const canvas = document.getElementById('candlestick-chart');
+            const ctx = canvas.getContext('2d');
+
+            // Set canvas size
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+
+            const data = generateCandlestickData(60, 2580, 'down');
+            const padding = { top: 20, right: 60, bottom: 20, left: 10 };
+            const chartWidth = canvas.width - padding.left - padding.right;
+            const chartHeight = canvas.height - padding.top - padding.bottom;
+
+            // Find min/max
+            const prices = data.flatMap(d => [d.high, d.low]);
+            const minPrice = Math.min(...prices);
+            const maxPrice = Math.max(...prices);
+            const priceRange = maxPrice - minPrice;
+
+            const candleWidth = chartWidth / data.length * 0.7;
+            const candleGap = chartWidth / data.length * 0.3;
+
+            // Draw grid
+            ctx.strokeStyle = '#E2E4E9';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 5; i++) {
+                const y = padding.top + (chartHeight / 5) * i;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(canvas.width - padding.right, y);
+                ctx.stroke();
+
+                // Price labels
+                const price = maxPrice - (priceRange / 5) * i;
+                ctx.fillStyle = '#9CA3AF';
+                ctx.font = '10px "Noto Sans KR"';
+                ctx.textAlign = 'left';
+                ctx.fillText(Math.round(price).toLocaleString(), canvas.width - padding.right + 5, y + 3);
+            }
+
+            // Draw candlesticks
+            data.forEach((candle, i) => {
+                const x = padding.left + i * (candleWidth + candleGap);
+                const openY = padding.top + ((maxPrice - candle.open) / priceRange) * chartHeight;
+                const closeY = padding.top + ((maxPrice - candle.close) / priceRange) * chartHeight;
+                const highY = padding.top + ((maxPrice - candle.high) / priceRange) * chartHeight;
+                const lowY = padding.top + ((maxPrice - candle.low) / priceRange) * chartHeight;
+
+                const isUp = candle.close > candle.open;
+                ctx.strokeStyle = isUp ? '#E54040' : '#3182F6';
+                ctx.fillStyle = isUp ? '#E54040' : '#3182F6';
+
+                // Wick
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x + candleWidth / 2, highY);
+                ctx.lineTo(x + candleWidth / 2, lowY);
+                ctx.stroke();
+
+                // Body
+                const bodyHeight = Math.abs(closeY - openY);
+                const bodyY = Math.min(openY, closeY);
+                if (bodyHeight < 1) {
+                    ctx.fillRect(x, bodyY, candleWidth, 1);
+                } else {
+                    ctx.fillRect(x, bodyY, candleWidth, bodyHeight);
+                }
+            });
+        }
+
+        // Draw volume chart
+        function drawVolumeChart() {
+            const canvas = document.getElementById('volume-chart');
+            const ctx = canvas.getContext('2d');
+
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+
+            const data = generateCandlestickData(60, 2580, 'down');
+            const padding = { top: 5, right: 60, bottom: 5, left: 10 };
+            const chartWidth = canvas.width - padding.left - padding.right;
+            const chartHeight = canvas.height - padding.top - padding.bottom;
+
+            const volumes = data.map(d => d.volume);
+            const maxVolume = Math.max(...volumes);
+
+            const barWidth = chartWidth / data.length * 0.7;
+            const barGap = chartWidth / data.length * 0.3;
+
+            data.forEach((candle, i) => {
+                const x = padding.left + i * (barWidth + barGap);
+                const barHeight = (candle.volume / maxVolume) * chartHeight;
+                const y = canvas.height - padding.bottom - barHeight;
+
+                const isUp = candle.close > candle.open;
+                ctx.fillStyle = isUp ? 'rgba(229, 64, 64, 0.5)' : 'rgba(49, 130, 246, 0.5)';
+                ctx.fillRect(x, y, barWidth, barHeight);
+            });
+        }
+
+        // Initialize charts
+        drawCandlestickChart();
+        drawVolumeChart();
+    </script>
+</body>
+</html>

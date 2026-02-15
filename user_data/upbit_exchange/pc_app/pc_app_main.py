@@ -12,7 +12,7 @@ if str(PARENT_DIR) not in sys.path:
 
 from pc_app.engine import load_or_create_config, resolve_config_path, setup_logging, MainEngine
 from pc_app.qt import QtCore, QtWidgets
-from pc_app.ui import Window1, Window2
+from pc_app.ui import SshSettingsDialog, Window1, Window2
 
 
 def _apply_geometry(window: QtWidgets.QWidget, geom: Dict[str, int]) -> None:
@@ -55,12 +55,28 @@ def _update_ui(engine: MainEngine, window1: Window1, window2: Window2) -> None:
     window2.header.check_alert(diag)
 
 
+def _run_ssh_setup_dialog(engine: MainEngine) -> None:
+    dialog = SshSettingsDialog(
+        initial_settings=engine.get_ssh_settings(),
+        test_callback=engine.test_ssh_settings,
+    )
+    result = dialog.exec()
+    if result == QtWidgets.QDialog.Accepted:
+        settings, passphrase = dialog.result_payload()
+        engine.apply_ssh_settings(settings, passphrase)
+    else:
+        # 사용자가 취소해도 앱은 중단하지 않고 로컬 DB 폴백으로 계속 실행한다.
+        engine.mark_ssh_unavailable("USER_CANCEL")
+
+
 def main() -> int:
     config = load_or_create_config()
     logger = setup_logging(config)
     engine = MainEngine(config, logger)
 
     app = QtWidgets.QApplication([])
+    _run_ssh_setup_dialog(engine)
+
     window1 = Window1(engine)
     window2 = Window2(engine)
 
@@ -75,6 +91,11 @@ def main() -> int:
     timer.setInterval(50)
     timer.timeout.connect(lambda: _update_ui(engine, window1, window2))
     timer.start()
+
+    snapshot_timer = QtCore.QTimer()
+    snapshot_timer.setInterval(engine.get_snapshot_pull_interval_sec() * 1000)
+    snapshot_timer.timeout.connect(lambda: engine.trigger_periodic_snapshot_pull(reason="periodic"))
+    snapshot_timer.start()
 
     def _on_quit() -> None:
         engine.stop()

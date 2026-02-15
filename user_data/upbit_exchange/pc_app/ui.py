@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
+import threading
 import time
 from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional
 
-from .engine import Candle, DISPLAY_NAMES, TIMEFRAMES_MS
+from .engine import Candle, DEFAULT_SSH_CONFIG, DISPLAY_NAMES, TIMEFRAMES_MS
 from .qt import QtCore, QtGui, QtWidgets, Signal
 
 
@@ -131,7 +132,7 @@ class EventStore:
         symbols = diag.get("symbols", {})
         for symbol, state in symbols.items():
             ws = str(state.get("ws", "OK"))
-            mode = str(state.get("mode", "LIVE"))
+            mode = str(state.get("mode", "LIVE_ACTIVE"))
             if symbol in self._last_ws and self._last_ws[symbol] != ws:
                 self._push(f"{symbol} WS 상태 변경: {self._last_ws[symbol]} -> {ws}")
             if symbol in self._last_mode and self._last_mode[symbol] != mode:
@@ -141,6 +142,229 @@ class EventStore:
 
     def recent(self, n: int = 5) -> List[str]:
         return list(self.events)[:n]
+
+
+class _SshTestBridge(QtCore.QObject):
+    finished = Signal(bool, str)
+
+
+class SshSettingsDialog(QtWidgets.QDialog):
+    def __init__(
+        self,
+        initial_settings: Dict[str, Any],
+        test_callback: Callable[[Dict[str, Any], Optional[str]], tuple],
+        parent: Optional[QtWidgets.QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("SSH 로그인/연결 설정")
+        self.setModal(True)
+        self.setMinimumWidth(620)
+        merged = dict(DEFAULT_SSH_CONFIG)
+        merged.update(initial_settings or {})
+        self._test_callback = test_callback
+        self._bridge = _SshTestBridge()
+        self._bridge.finished.connect(self._on_test_finished)
+        self._test_passed = False
+        self._testing = False
+        self._result_settings: Dict[str, Any] = {}
+        self._result_passphrase: Optional[str] = None
+
+        self.enable_check = QtWidgets.QCheckBox("SSH 기능 사용")
+        self.enable_check.setChecked(bool(merged.get("enabled", False)))
+        self.host_edit = QtWidgets.QLineEdit(str(merged.get("host", "")))
+        self.port_spin = QtWidgets.QSpinBox()
+        self.port_spin.setRange(1, 65535)
+        self.port_spin.setValue(int(merged.get("port", 22)))
+        self.user_edit = QtWidgets.QLineEdit(str(merged.get("username", "")))
+        self.ppk_edit = QtWidgets.QLineEdit(str(merged.get("ppk_path", "")))
+        self.ppk_browse_btn = QtWidgets.QPushButton("찾기")
+        self.use_pageant_check = QtWidgets.QCheckBox("Pageant 우선 사용")
+        self.use_pageant_check.setChecked(bool(merged.get("use_pageant", True)))
+        self.passphrase_edit = QtWidgets.QLineEdit("")
+        self.passphrase_edit.setEchoMode(QtWidgets.QLineEdit.Password)
+        self.remote_db_edit = QtWidgets.QLineEdit(str(merged.get("remote_db_path", "")))
+        self.remote_snapshot_edit = QtWidgets.QLineEdit(str(merged.get("remote_snapshot_path", "")))
+        self.remote_config_edit = QtWidgets.QLineEdit(str(merged.get("remote_config_path", "")))
+        self.pull_interval_spin = QtWidgets.QSpinBox()
+        self.pull_interval_spin.setRange(60, 3600)
+        self.pull_interval_spin.setValue(int(merged.get("pull_interval_sec", 300)))
+
+        self.status_label = QtWidgets.QLabel("연결 테스트 필요")
+        self.status_label.setWordWrap(True)
+        self.test_btn = QtWidgets.QPushButton("연결 테스트")
+        self.apply_btn = QtWidgets.QPushButton("적용")
+        self.cancel_btn = QtWidgets.QPushButton("취소")
+        self.apply_btn.setEnabled(False if self.enable_check.isChecked() else True)
+
+        self._build_ui()
+        self._connect_signals()
+        self._on_enable_toggled(self.enable_check.isChecked())
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
+        layout.addWidget(self.enable_check)
+
+        form = QtWidgets.QFormLayout()
+        form.setLabelAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(8)
+        form.addRow("Host", self.host_edit)
+        form.addRow("Port", self.port_spin)
+        form.addRow("Username", self.user_edit)
+
+        ppk_row = QtWidgets.QHBoxLayout()
+        ppk_row.setContentsMargins(0, 0, 0, 0)
+        ppk_row.addWidget(self.ppk_edit, 1)
+        ppk_row.addWidget(self.ppk_browse_btn)
+        ppk_box = QtWidgets.QWidget()
+        ppk_box.setLayout(ppk_row)
+        form.addRow("PPK 경로", ppk_box)
+
+        form.addRow("", self.use_pageant_check)
+        form.addRow("Passphrase", self.passphrase_edit)
+        form.addRow("Remote DB", self.remote_db_edit)
+        form.addRow("Remote Snapshot", self.remote_snapshot_edit)
+        form.addRow("Remote Config", self.remote_config_edit)
+        form.addRow("Pull 주기(초)", self.pull_interval_spin)
+        layout.addLayout(form)
+
+        info = QtWidgets.QLabel(
+            "보안 정책: passphrase는 디스크에 저장하지 않습니다. "
+            "이번 실행 동안 메모리에만 유지됩니다."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+        layout.addWidget(self.status_label)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(self.test_btn)
+        btn_row.addWidget(self.apply_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
+
+    def _connect_signals(self) -> None:
+        self.enable_check.toggled.connect(self._on_enable_toggled)
+        self.ppk_browse_btn.clicked.connect(self._on_browse_ppk)
+        self.test_btn.clicked.connect(self._on_test_clicked)
+        self.apply_btn.clicked.connect(self._on_apply_clicked)
+        self.cancel_btn.clicked.connect(self.reject)
+
+        widgets = [
+            self.host_edit,
+            self.user_edit,
+            self.ppk_edit,
+            self.passphrase_edit,
+            self.remote_db_edit,
+            self.remote_snapshot_edit,
+            self.remote_config_edit,
+        ]
+        for w in widgets:
+            w.textChanged.connect(self._mark_dirty)
+        self.port_spin.valueChanged.connect(self._mark_dirty)
+        self.pull_interval_spin.valueChanged.connect(self._mark_dirty)
+        self.use_pageant_check.toggled.connect(self._mark_dirty)
+
+    def _on_enable_toggled(self, enabled: bool) -> None:
+        for widget in (
+            self.host_edit,
+            self.port_spin,
+            self.user_edit,
+            self.ppk_edit,
+            self.ppk_browse_btn,
+            self.use_pageant_check,
+            self.passphrase_edit,
+            self.remote_db_edit,
+            self.remote_snapshot_edit,
+            self.remote_config_edit,
+            self.pull_interval_spin,
+            self.test_btn,
+        ):
+            widget.setEnabled(enabled)
+        if not enabled:
+            self.status_label.setText("SSH 비활성화: 로컬 DB 폴백으로 실행합니다.")
+            self.apply_btn.setEnabled(True)
+        else:
+            self.status_label.setText("연결 테스트 필요")
+            self.apply_btn.setEnabled(self._test_passed)
+
+    def _on_browse_ppk(self) -> None:
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "PPK 파일 선택",
+            self.ppk_edit.text().strip() or str(Path.home()),
+            "PuTTY Private Key (*.ppk);;All Files (*)",
+        )
+        if path:
+            self.ppk_edit.setText(path)
+
+    def _mark_dirty(self, *args: Any) -> None:
+        self._test_passed = False
+        if self.enable_check.isChecked():
+            self.apply_btn.setEnabled(False)
+            self.status_label.setText("변경 감지: 연결 테스트를 다시 실행하세요.")
+
+    def _collect_settings(self) -> Dict[str, Any]:
+        return {
+            "enabled": bool(self.enable_check.isChecked()),
+            "host": self.host_edit.text().strip(),
+            "port": int(self.port_spin.value()),
+            "username": self.user_edit.text().strip(),
+            "ppk_path": self.ppk_edit.text().strip(),
+            "use_pageant": bool(self.use_pageant_check.isChecked()),
+            "remote_db_path": self.remote_db_edit.text().strip(),
+            "remote_snapshot_path": self.remote_snapshot_edit.text().strip(),
+            "remote_config_path": self.remote_config_edit.text().strip(),
+            "pull_interval_sec": int(self.pull_interval_spin.value()),
+        }
+
+    def _on_test_clicked(self) -> None:
+        if self._testing:
+            return
+        settings = self._collect_settings()
+        if not settings.get("enabled"):
+            self._test_passed = True
+            self.apply_btn.setEnabled(True)
+            self.status_label.setText("SSH 비활성화 상태입니다. 적용 가능합니다.")
+            return
+
+        passphrase = self.passphrase_edit.text()
+        self._testing = True
+        self.test_btn.setEnabled(False)
+        self.apply_btn.setEnabled(False)
+        self.status_label.setText("연결 테스트 중... (UI 블로킹 없음)")
+
+        def _worker() -> None:
+            try:
+                ok, msg = self._test_callback(settings, passphrase or None)
+            except Exception:
+                ok, msg = False, "연결 테스트 중 예외 발생"
+            self._bridge.finished.emit(bool(ok), str(msg))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_test_finished(self, ok: bool, msg: str) -> None:
+        self._testing = False
+        self.test_btn.setEnabled(True)
+        self._test_passed = ok
+        self.apply_btn.setEnabled(ok)
+        self.status_label.setText(msg if msg else ("연결 성공" if ok else "연결 실패"))
+
+    def _on_apply_clicked(self) -> None:
+        settings = self._collect_settings()
+        if settings.get("enabled") and not self._test_passed:
+            self.status_label.setText("적용 전 연결 테스트가 필요합니다.")
+            return
+        self._result_settings = settings
+        passphrase = self.passphrase_edit.text().strip()
+        # 보안 정책: passphrase는 반환만 하고 파일/설정에는 저장하지 않는다.
+        self._result_passphrase = passphrase if passphrase else None
+        self.accept()
+
+    def result_payload(self) -> tuple:
+        return dict(self._result_settings), self._result_passphrase
 
 
 class AlertStrip(QtWidgets.QFrame):
@@ -203,16 +427,21 @@ class HeaderBar(QtWidgets.QFrame):
         self.show_tabs = show_tabs
         self.logo_label = QtWidgets.QLabel()
         self.monitor_label = QtWidgets.QLabel("Monitor")
-        self.live_chip = StatusChip("● LIVE")
-        self.ws_chip = StatusChip("● WS 0.0s")
-        self.live_chip_right = StatusChip("● LIVE")
-        self.ws_chip_right = StatusChip("● WS 0.0s")
+        self.live_chip = StatusChip("● MODE")
+        self.ws_chip = StatusChip("● WS")
+        self.fresh_chip = StatusChip("● 거래없음 0초")
+        self.order_chip = StatusChip("● ORDER")
+        self.live_chip_right = StatusChip("● MODE")
+        self.ws_chip_right = StatusChip("● WS")
+        self.fresh_chip_right = StatusChip("● 거래없음 0초")
+        self.order_chip_right = StatusChip("● ORDER")
         self.alert_label = QtWidgets.QLabel("")
         self.alert_label.hide()
         self.theme_label = QtWidgets.QLabel("LIGHT THEME")
         self.theme_btn = QtWidgets.QToolButton()
         self.theme_btn.setText("⚙")
         self.tab_group: Dict[str, QtWidgets.QPushButton] = {}
+        self._alert_started_at: Optional[float] = None
 
         self._build_ui()
         ThemeManager.subscribe(self.apply_theme)
@@ -228,7 +457,7 @@ class HeaderBar(QtWidgets.QFrame):
         return None
 
     def _build_ui(self) -> None:
-        self.setFixedHeight(48)
+        self.setFixedHeight(56)
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(8)
@@ -244,11 +473,15 @@ class HeaderBar(QtWidgets.QFrame):
         layout.addWidget(self.monitor_label)
         layout.addWidget(self.live_chip)
         layout.addWidget(self.ws_chip)
+        layout.addWidget(self.fresh_chip)
+        layout.addWidget(self.order_chip)
         layout.addStretch()
         layout.addWidget(self.alert_label)
         if not self.show_tabs:
             layout.addWidget(self.live_chip_right)
             layout.addWidget(self.ws_chip_right)
+            layout.addWidget(self.fresh_chip_right)
+            layout.addWidget(self.order_chip_right)
 
         if self.show_tabs:
             for sym in ("ETH", "XRP", "BTC"):
@@ -274,10 +507,20 @@ class HeaderBar(QtWidgets.QFrame):
 
     def check_alert(self, diag: Dict[str, Any]) -> None:
         symbols = diag.get("symbols", {})
-        bad = [s for s, st in symbols.items() if st.get("ws") not in ("OK",)]
+        bad = []
+        for symbol, state in symbols.items():
+            l1 = str(state.get("ws_l1", "DISCONNECTED"))
+            l2 = str(state.get("ws_l2", "UNKNOWN"))
+            if l1 != "CONNECTED" or l2 != "ALIVE":
+                bad.append(symbol)
         if bad:
-            self.alert_label.setText(f"⚠ 경고: WS 상태 불안정 ({', '.join(bad)})")
-            self.alert_label.show()
+            now_ts = time.time()
+            if self._alert_started_at is None:
+                self._alert_started_at = now_ts
+            # 경고 깜빡임을 막기 위해 3초 디바운싱 후에만 노출한다.
+            if now_ts - self._alert_started_at >= 3.0:
+                self.alert_label.setText(f"경고: WS 상태 불안정 ({', '.join(bad)})")
+                self.alert_label.show()
             t = ThemeManager.current()
             self.alert_label.setStyleSheet(
                 f"font-size:11px; font-weight:500; color:{t['status-warn']};"
@@ -285,6 +528,7 @@ class HeaderBar(QtWidgets.QFrame):
                 "border-radius:6px; padding:2px 10px;"
             )
         else:
+            self._alert_started_at = None
             self.alert_label.hide()
 
     def update_status(self, snaps: Dict[str, Dict[str, Any]]) -> None:
@@ -292,16 +536,50 @@ class HeaderBar(QtWidgets.QFrame):
         left = ordered[0] if ordered else {}
         right = ordered[1] if len(ordered) > 1 else {}
 
-        def _set_pair(live_chip: StatusChip, ws_chip: StatusChip, snap: Dict[str, Any]) -> None:
-            age = float(snap.get("last_message_age", 0.0))
-            ws_chip.setText(f"● WS {age:.1f}s")
-            ws_chip.set_kind("ok" if age < 2.0 else "warn")
-            mode = str(snap.get("mode", "LIVE"))
+        def _set_pair(
+            live_chip: StatusChip,
+            ws_chip: StatusChip,
+            fresh_chip: StatusChip,
+            order_chip: StatusChip,
+            snap: Dict[str, Any],
+        ) -> None:
+            mode = str(snap.get("mode", "DB_ONLY"))
             live_chip.setText(f"● {mode}")
-            live_chip.set_kind("ok" if mode == "LIVE" else "warn")
+            live_chip.set_kind("ok" if mode == "LIVE_ACTIVE" else "warn")
 
-        _set_pair(self.live_chip, self.ws_chip, left)
-        _set_pair(self.live_chip_right, self.ws_chip_right, right if right else left)
+            ws_l1 = str(snap.get("ws_l1", "DISCONNECTED"))
+            ws_l2 = str(snap.get("ws_l2", "UNKNOWN"))
+            ws_chip.setText(f"● WS {ws_l1}/{ws_l2}")
+            if ws_l1 == "CONNECTED" and ws_l2 == "ALIVE":
+                ws_chip.set_kind("ok")
+            elif ws_l1 in ("CONNECTING", "RECONNECTING", "RECONNECT_WAIT"):
+                ws_chip.set_kind("warn")
+            else:
+                ws_chip.set_kind("fail")
+
+            age = float(snap.get("last_trade_age_sec", snap.get("last_message_age", 0.0)))
+            fresh_chip.setText(f"● 거래없음 {int(age)}초")
+            fresh_chip.set_kind("neutral")
+
+            order_state = str(snap.get("order_state", "ORDER_LOCKED_DRYRUN"))
+            if order_state == "ORDER_KEYS_READY":
+                order_chip.setText("● ORDER READY")
+                order_chip.set_kind("ok")
+            elif order_state == "ORDER_LOCKED_DRYRUN":
+                order_chip.setText("● ORDER LOCKED")
+                order_chip.set_kind("warn")
+            else:
+                order_chip.setText("● ORDER ERROR")
+                order_chip.set_kind("fail")
+
+        _set_pair(self.live_chip, self.ws_chip, self.fresh_chip, self.order_chip, left)
+        _set_pair(
+            self.live_chip_right,
+            self.ws_chip_right,
+            self.fresh_chip_right,
+            self.order_chip_right,
+            right if right else left,
+        )
 
     def apply_theme(self) -> None:
         t = ThemeManager.current()
@@ -587,7 +865,7 @@ class ConnectionSection(QtWidgets.QFrame):
         layout.setContentsMargins(10, 8, 10, 8)
         self.title = QtWidgets.QLabel("커넥션 상세")
         layout.addWidget(self.title)
-        for key in ("WS ETH", "WS XRP", "WS BTC", "DB Write"):
+        for key in ("WS ETH", "WS XRP", "WS BTC", "DB Snapshot", "SSH"):
             row = QtWidgets.QHBoxLayout()
             left = QtWidgets.QLabel(key)
             right = QtWidgets.QLabel("-")
@@ -603,9 +881,14 @@ class ConnectionSection(QtWidgets.QFrame):
         syms = diag.get("symbols", {})
         for key, symbol in (("WS ETH", "KRW-ETH"), ("WS XRP", "KRW-XRP"), ("WS BTC", "KRW-BTC")):
             st = syms.get(symbol, {})
-            age = float(st.get("last_message_age", 0.0))
-            self.rows[key].setText(f"{age:.1f}s")
-        self.rows["DB Write"].setText("정상")
+            l1 = str(st.get("ws_l1", "DISCONNECTED"))
+            l2 = str(st.get("ws_l2", "UNKNOWN"))
+            age = float(st.get("last_trade_age_sec", st.get("last_message_age", 0.0)))
+            self.rows[key].setText(f"{l1}/{l2} | 거래없음 {int(age)}초")
+        db_state = diag.get("db_snapshot", {})
+        ssh_state = diag.get("ssh", {})
+        self.rows["DB Snapshot"].setText(str(db_state.get("status", "IDLE")))
+        self.rows["SSH"].setText(str(ssh_state.get("status", "UNCONFIGURED")))
 
     def apply_theme(self) -> None:
         t = ThemeManager.current()
@@ -708,17 +991,24 @@ class DashboardPanel(QtWidgets.QFrame):
 
     def update_dashboard(self, diag: Dict[str, Any], snaps: Dict[str, Dict[str, Any]]) -> None:
         symbols = diag.get("symbols", {})
-        ages = [float(v.get("last_message_age", 0.0)) for v in symbols.values()]
-        min_age = min(ages) if ages else 0.0
-        ws_ok = all(v.get("ws") == "OK" for v in symbols.values()) if symbols else False
-        reconnects = 0
+        ages = [float(v.get("last_trade_age_sec", v.get("last_message_age", 0.0))) for v in symbols.values()]
+        max_age = max(ages) if ages else 0.0
+        ws_ok = all(
+            str(v.get("ws_l1", "")) == "CONNECTED" and str(v.get("ws_l2", "")) == "ALIVE"
+            for v in symbols.values()
+        ) if symbols else False
+        reconnects = sum(
+            1 for v in symbols.values() if str(v.get("ws_l1", "")) in ("RECONNECTING", "RECONNECT_WAIT")
+        )
         total_ticks = sum(int(v.get("total_ticks", 0)) for v in symbols.values())
+        db_state = diag.get("db_snapshot", {})
+        ssh_state = diag.get("ssh", {})
         self.tiles["ws"].set_data("OK" if ws_ok else "WARN", f"{len(symbols)} 심볼")
-        self.tiles["db"].set_data(f"{int(min_age*1000)}ms", "기준 100ms")
-        self.tiles["recv"].set_data(f"{min_age:.1f}s", "avg")
-        self.tiles["reconnect"].set_data(str(reconnects), "최근 1분")
+        self.tiles["db"].set_data(str(db_state.get("status", "IDLE")), "DB snapshot")
+        self.tiles["recv"].set_data(f"{max_age:.1f}s", "max 거래없음")
+        self.tiles["reconnect"].set_data(str(reconnects), "최근 상태")
         self.tiles["rate"].set_data(f"{total_ticks}/s", "최근 추정")
-        self.tiles["err"].set_data("0.0%", "최근 1분")
+        self.tiles["err"].set_data(str(ssh_state.get("status", "UNCONFIGURED")), "SSH")
         self.connection.update_data(diag)
         self.timeline.update_events(self.event_store.recent(5))
 
@@ -741,14 +1031,17 @@ class FooterBar(QtWidgets.QFrame):
 
     def update_status(self, diag: Dict[str, Any], snaps: Dict[str, Dict[str, Any]]) -> None:
         symbols = diag.get("symbols", {})
-        ages = [float(v.get("last_message_age", 0.0)) for v in symbols.values()]
-        age = min(ages) if ages else 0.0
-        db_lag = int(age * 1000)
+        ages = [float(v.get("last_trade_age_sec", v.get("last_message_age", 0.0))) for v in symbols.values()]
+        age = max(ages) if ages else 0.0
+        db_state = diag.get("db_snapshot", {})
+        reconnects = sum(
+            1 for v in symbols.values() if str(v.get("ws_l1", "")) in ("RECONNECTING", "RECONNECT_WAIT")
+        )
         uptime = int(time.time() - self._boot)
         mm = uptime // 60
         ss = uptime % 60
         self.label.setText(
-            f"● Last Tick {age:.1f}s | Reconnects 0 | DB Lag {db_lag}ms | Uptime {mm}m {ss:02d}s"
+            f"● 거래없음 최대 {age:.1f}s | Reconnects {reconnects} | DB {db_state.get('status', 'IDLE')} | Uptime {mm}m {ss:02d}s"
         )
 
     def apply_theme(self) -> None:

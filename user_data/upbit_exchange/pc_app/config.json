@@ -1,0 +1,41 @@
+{
+  "symbols": [
+    "KRW-XRP",
+    "KRW-BTC",
+    "KRW-ETH"
+  ],
+  "default_timeframe_ms": 3600000,
+  "db_path": "ohlcv_short.sqlite",
+  "logo_path": "assets/upbit_logo.png",
+  "initial_candles": 600,
+  "no_trade_warn_sec": 3.0,
+  "window_positions": {
+    "window1": {
+      "x": 0,
+      "y": 0,
+      "width": 1920,
+      "height": 1080,
+      "monitor": 0
+    },
+    "window2": {
+      "x": 1920,
+      "y": 0,
+      "width": 1920,
+      "height": 1080,
+      "monitor": 1
+    }
+  },
+  "ssh": {
+    "enabled": false,
+    "host": "152.69.234.80",
+    "port": 22,
+    "username": "opc",
+    "ppk_path": "",
+    "use_pageant": true,
+    "remote_db_path": "/home/opc/python/ft_userdata_upbit/user_data/upbit_exchange/ohlcv_short.sqlite",
+    "remote_snapshot_path": "/tmp/ohlcv_short_snapshot.sqlite",
+    "remote_config_path": "/home/opc/python/ft_userdata_upbit/user_data/config.json",
+    "pull_interval_sec": 300
+  },
+  "log_path": null
+}
