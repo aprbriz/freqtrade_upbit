@@ -1,9 +1,9 @@
 # 업비트 실시간 OHLCV 수집기 + PC 차트 앱 - SSOT (Single Source of Truth)
 
 **프로젝트**: Freqtrade_upbit Real-time OHLCV Collector + PC Chart App  
-**버전**: v3.4 (SSOT 간소화 - 히스토리 분리)  
+**버전**: v3.5 (Phase 2.5 DETAILED WORK ORDER 통합)  
 **생성일**: 2026-01-26  
-**최종 업데이트**: 2026-02-14  
+**최종 업데이트**: 2026-02-15  
 
 ---
 
@@ -160,9 +160,18 @@ upbit_exchange/
 - [ ] 3틱봉 인덱스축 + KST 툴팁
 - [ ] Raw Trade 단일 구독 (3개 심볼 고정)
 - [ ] 타임프레임 변경 시 즉시 전환 (0.1초)
-- [ ] **테마 기본값 Light(흰 배경) 적용** (DEC-027)
-- [ ] **테마 토글 Dark(검정/다크) 적용** (DEC-027)
-- [ ] **테마 전환 시 텍스트/아이콘/그리드/구분선 자동 조정(가독성 유지)** (DEC-027)
+- [ ] **테마 기본값 Light(흰 배경) 적용** (DEC-027 v1)
+- [ ] **테마 토글 Dark(검정/다크) 적용** (DEC-027 v1)
+- [ ] **테마 전환 시 텍스트/아이콘/그리드/구분선 자동 조정(가독성 유지)** (DEC-027 v1)
+- [ ] **SSH 로그인/연결 설정 다이얼로그 정상 표시** (DEC-033)
+- [ ] **SSH 연결 테스트(비동기) 정상 동작** (DEC-033)
+- [ ] **SSH Cancel/실패 시 폴백(로컬 스냅샷) 동작** (DEC-028, DEC-033)
+- [ ] **DB 스냅샷 pull 성공 시 로컬 교체(atomic)** (DEC-028, DEC-PC-033)
+- [ ] **주문 상태 칩 (LOCKED/READY/ERROR) 정상 표시** (DEC-031)
+- [ ] **dry_run=true 시 ORDER LOCKED 표시** (DEC-031)
+- [ ] **dry_run=false + 키 정상 시 ORDER READY 표시** (DEC-031)
+- [ ] **LIVE_ACTIVE에서 볼륨 막대 틱 단위 누적** (DEC-032)
+- [ ] **WS 연결 상태(L1/L2)와 "거래없음 n초"(L3) 분리 표기** (DEC-030)
 
 ### AC-PC-002: PC 앱 성능/안정성
 - [ ] BURST 폭주 시 UI 프리징 없음 (coalesce 허용)
@@ -174,8 +183,15 @@ upbit_exchange/
 - [ ] config.json 생성/로드/저장 정상
 - [ ] 로그 로테이션 적용 (24/7 대응)
 - [ ] SQLite 로컬 복사본 mode=ro 오픈
-- [ ] 듀얼 모니터 핫플러그 대응 (자동 폴백)
-- [ ] **테마 전환이 성능/프리징에 영향 없음(토큰 기반, 즉시 반영)** (DEC-027)
+- [ ] 듀얼 모니터 핫플러그 대응 (자동 폐)
+- [ ] **테마 전환이 성능/프리징에 영향 없음(토큰 기반, 즉시 반영)** (DEC-027 v1)
+- [ ] **SSH 연결 테스트/파일 전송이 UI 스레드 블로킹 없음(Worker)** (DEC-PC-034, DEC-033)
+- [ ] **SSH 작업 타임아웃(3s/8s) 준수** (DEC-PC-036)
+- [ ] **SSH 무한 재시도 없음(백오프만)** (DEC-PC-036)
+- [ ] **passphrase 평문 저장/로그 출력 0건** (DEC-033, DEC-PC-034)
+- [ ] **Upbit API 키 평문 저장/로그 출력 0건** (DEC-031)
+- [ ] **실행 중 DB 교체 시 Close→Swap→Reopen 순서 준수** (DEC-PC-033)
+- [ ] **PuTTY Portable 번들 사용(설치/PATH 요구 없음)** (DEC-PC-031)
 
 ### AC-PC-003: PC 앱 섞임 방지
 - [ ] Raw Trade 방식 섞임 방지 (context_id, generation_id)
@@ -251,8 +267,53 @@ upbit_exchange/
 
 ### 🟡 RISK-PC-006: 라이트 테마에서 가독성/계층 붕괴
 - **증상**: 그리드 과진/희미, 카드 경계 소실, 경고가 차트 색(빨강/파랑)과 혼동, 상단 바 과도한 자극, KPI 강조 실패
-- **대응**: 토큰 기반 테마 + 계층 규칙 강제 (DEC-027)
+- **대응**: 토큰 기반 테마 + 계층 규칙 강제 (DEC-027 v1)
 - **검증**: Light/Dark 모두에서 동일한 정보 계층 체감 유지
+
+### 🟡 RISK-PC-007: SQLite WAL 스냅샷 불일관 (DEC-028)
+- **증상**: PC 앱이 Cloud DB를 네트워크 경로로 직접 열거나, WAL 모드의 메인 파일만 복사하면 불일치 발생
+- **대응**: "원격에서 snapshot 생성 후 pull"로 완화 (SSH/SCP)
+- **검증**: 스냅샷 pull 시 일관성 보장, 실패 시 폴백
+
+### 🟡 RISK-PC-008: cutover 경계 모호성 (DEC-PC-032)
+- **증상**: `cutover_ts` 경계가 `<`/`<=`로 혼재하면 중복/유령 캔들 발생
+- **대응**: `<`/`>=` 경계 규칙을 문서로 고정하여 완화 (Strategy A+)
+- **검증**: DB/LIVE 병합 시 중복/섞임 0건
+
+### 🟡 RISK-PC-009: WS 경고 오탐 (알람 피로)
+- **증상**: `last_message_age`를 연결 경고로 오인하여 "거래 없음" 시에도 경고 발생
+- **대응**: L1/L2/L3 분리 + 3초 디바운싱으로 완화 (DEC-030)
+- **검증**: 거래 공백 시 경고 없음, 실제 끊김 시만 경고
+
+### 🟡 RISK-ORDER-KEY-001: Upbit 키 유출/로컬 저장 (DEC-031)
+- **증상**: API 키가 로그/파일/레지스트리로 유출되거나, dry_run 무시하고 주문 전송
+- **대응**: "메모리 전용 + 마스킹 + 로그 금지 + dry_run LOCK"으로 완화
+- **검증**: dry_run=true 시 주문 LOCK, 키 평문 로그/파일 0건
+
+### 🟡 RISK-ORDER-KEY-002: config.json 필드 변동/누락 (DEC-031)
+- **증상**: `exchange.key`/`exchange.secret`/`dry_run` 필드 누락/타입 불일치 시 예외 처리 미흡
+- **대응**: 필드 경로 고정 + 예외처리(누락/타입/빈값) + exchange.name 강제(upbit) + dry_run 게이트 + 누락 시 안전 LOCK + UI 원인 코드 표기
+- **검증**: 필드 누락 시 LOCK, exchange.name != upbit 시 Fatal
+
+### 🟡 RISK-SSH-LOGIN-001: SSH passphrase 취급 오류/평문 저장/로그 노출 (DEC-033, DEC-PC-034)
+- **증상**: passphrase가 config.json/로그/에러 메시지로 유출
+- **대응**: "저장 금지 + 마스킹 + 로그 금지 + UI/Worker 분리"로 완화
+- **검증**: passphrase 평문 저장/로그 0건
+
+### 🟡 RISK-SSH-DEP-001: SSH/PPK 처리에서 숨은 의존성/설치 문제 (DEC-PC-031)
+- **증상**: paramiko 등 새 pip 의존성 추가 또는 PuTTY 설치/PATH 요구
+- **대응**: "PuTTY Portable 번들 + 절대경로 호출(설치/PATH 금지)"로 완화
+- **검증**: pip 의존성 추가 없음, PuTTY 설치 요구 없음
+
+### 🟡 RISK-SSH-HANG-001: SSH Pull 무한 대기/프리징 (DEC-PC-036)
+- **증상**: SSH/SCP 작업이 타임아웃 없이 무한 대기하거나, 무한 재시도로 폭주
+- **대응**: "타임아웃(3s/8s) + 무한 재시도 금지 + 백오프"로 완화
+- **검증**: SSH 작업 8초 초과 시 강제 중단, 무한 재시도 없음
+
+### 🟡 RISK-PC-VOL-001: LIVE 볼륨 갱신이 끊겨 체감 저하 (DEC-032)
+- **증상**: 가격/캔들은 틱 단위로 움직이는데 볼륨 막대는 멈춰 보임
+- **대응**: "tick 누적 + coalesce 렌더"로 완화
+- **검증**: LIVE_ACTIVE에서 볼륨 막대 틱 단위 증가 확인
 
 ---
 
@@ -290,7 +351,7 @@ upbit_exchange/
 - **예외**: AC 충족을 위해 구조 변경이 필수라면, diff 최소를 이유로 회피 금지(SSOT/Task에 근거 남기기)
 - **상태**: ✅ 원칙 확정 (2026-02-12)
 
-### DEC-027: PC 앱 Light/Dark 테마 규칙 ✅
+### DEC-027 (v1): PC 앱 Light/Dark 테마 규칙 ✅
 - **전제**: 라이트(흰 배경) 기본 + 다크(검정/다크) 옵션(토글)
 - **토큰 기반**: background/surface/border/text-primary/text-secondary/grid/accent/warning/danger 등을 역할 기반으로 정의
 - **가독성**: 테마 전환 시 텍스트/아이콘/그리드/구분선 자동 조정, 동일한 정보 계층 체감 유지
@@ -302,6 +363,136 @@ upbit_exchange/
   - 상단 스트립 과자극 방지(Info/Warning/Critical 톤 분리)
   - KPI 계층(숫자/단위/설명) 고정, 임계치 초과 시만 강강조
 - **상태**: ✅ 원칙 확정 (2026-02-12)
+
+### DEC-028: DB 소스는 (C) SSH로 원격 파일 Pull (Read-Only) ✅
+- PC 앱은 Cloud SQLite를 네트워크로 직접 열지 않는다.
+- 원격에서 **일관 스냅샷(snapshot sqlite 단일 파일)** 을 생성한 뒤, SSH/SCP로 로컬에 내려받아 **RO로 오픈**한다.
+- 실패 시: 기존 로컬 스냅샷을 유지(폴백), UI에 "DB 업데이트 실패"만 표기.
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-029: 동기화/병합은 우선 "전략 A" ✅
+- **A(확정)**: DB seed 먼저 로드 → WS LIVE 연결 → `cutover_ts` 기준으로 LIVE 오버레이가 덮어쓴다.
+- **문서 명시(중기)**: 필요 시 **B(WS 버퍼 선행 → DB 로드 → 병합 → LIVE)** 로 전환 가능(이번 범위에서는 구현/의존 추가 금지).
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-030: UI 문구는 "시장정적" 금지, "거래없음" 사용 ✅
+- `last_message_age`는 장애 경고가 아니라 **"거래없음 n초"**(데이터 신선도) 표기용.
+- "연결 끊김/장애"는 **연결/heartbeat(L1/L2)** 로만 판단한다.
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-031: Upbit API 키는 Cloud의 freqtrade config.json에서 SSH로 읽어온다 (dry_run 게이트) ✅
+- PC 앱은 Upbit API 키를 **로컬 파일/레지스트리/로그에 저장하지 않는다**(메모리 내에서만 보관).
+- Oracle Cloud(SSH: `152.69.234.80:22`)에 있는 Freqtrade 설정 파일에서 읽는다:
+  - 경로(실서버): `/home/opc/python/ft_userdata_upbit/user_data/config.json`
+  - Docker(일반): `ft_userdata/user_data/config.json`
+  - Docker(우리 프로젝트): `ft_userdata_upbit/user_data/config.json`
+- `config.json`의 `dry_run` 값으로 주문 기능을 게이트한다:
+  - `"dry_run": true` → **키를 읽지 않거나(선택), 읽더라도 주문 기능은 잠금(LOCK)**. UI에 `DRY_RUN: 주문 잠금` 명시.
+  - `"dry_run": false` → `exchange.key`, `exchange.secret`를 읽어 **PC 앱 내부 "주문 모듈 경계"로 전달**한다. 주문 전송은 PC에서 직접 수행.
+- SSH 인증은 **PuTTY 키(.ppk)를 그대로 사용**한다.
+- 키 노출 방지(필수):
+  - UI 표시는 마스킹(예: `****abcd`)만 허용.
+  - 로그에는 절대 평문을 남기지 않는다(에러 메시지에도 포함 금지).
+  - 메모리에서도 가능한 최소 범위로 유지(주문 모듈 초기화 이후 불필요하면 폐기).
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-032: LIVE 모드에서 거래량(볼륨)도 틱 단위로 누적/갱신한다 ✅
+- 현재 PC 앱에서 **가격/캔들(분봉 포함)** 이 틱 단위로 움직이듯,
+- LIVE_ACTIVE에서 **거래량(볼륨) 막대도 동일한 틱 스트림으로 누적**되어야 한다.
+- 렌더링은 기존 정책을 따른다:
+  - 계산/집계는 every tick 반영
+  - UI는 coalesce(고정 주기)로 최신 스냅샷만 그림(중간 프레임 생략 가능)
+- DB_ONLY에서 볼륨은 DB history만 표시(틸트/보정 금지).
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-033: SSH 로그인/연결 설정 다이얼로그(필수) ✅
+- SSH/SCP가 필요한 기능(원격 DB 스냅샷 pull, 원격 config.json 조회)이 있으므로,
+  **PC 앱 시작 시 "SSH 로그인/연결 설정" 창을 1회 표시**하는 것을 기본으로 한다.
+- 인증은 **PuTTY(.ppk) 그대로 사용**한다.
+  - (A) `.ppk + passphrase` (기본)
+  - (B) `.ppk + Pageant` 사용 시 passphrase 입력 생략(가능하면)
+  - (C) (옵션/후순위) password 로그인은 필요 시만(동일 UI 폼에서 선택)
+- 입력 필드(기본값 포함):
+  - host: `152.69.234.80`
+  - port: `22`
+  - username: `opc`
+  - ppk_path: (사용자 선택; PuTTY의 .ppk)
+  - passphrase: (옵션; **저장 금지**, 세션 메모리만)
+  - remote_config_path: `/home/opc/python/ft_userdata_upbit/user_data/config.json`
+- 동작/정책:
+  - "연결 테스트(Test)" 버튼 제공(비동기). 성공해야 "적용(Apply)" 활성화.
+  - "취소(Cancel)" 또는 테스트 실패 시: **SSH 기능 스킵 + 기존 로컬 스냅샷 유지(폴백)**, UI에 "SSH 미연결(로컬 DB 사용)" 표기.
+  - SSH 연결 실패/타임아웃으로 앱이 죽거나 멈추면 실패(프리징 금지).
+- 저장 정책(보안):
+  - config.json에는 **host/port/username/ppk_path/remote_path 같은 '비밀 아닌 설정'만 저장**한다.
+  - **passphrase/비밀번호는 절대 저장하지 않는다.**(평문 저장 금지, 로그 출력 금지)
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-PC-031: PuTTY Portable 번들(puttygen/pscp)로 .ppk 지원, pip 의존성 추가 없음(설치/PATH 강제 금지) ✅
+- **pip 새 의존성(paramiko 등) 추가 금지 유지**
+- **PuTTY Portable 번들 채택**:
+  - `puttygen.exe` : `.ppk` 확인/검증(필요 시 변환)
+  - `pscp.exe` : 스냅샷 파일 Pull 전용(RO)
+- 번들은 `pc_app/third_party/putty/` 아래에 포함(PC 앱 범위 내 신규 파일은 허용).
+- 사용자는 **.ppk 파일만 제공**하면 된다(기존 요구사항 유지).
+- 보안/로그:
+  - passphrase/키/명령어 출력 금지(로그에 남기지 않는다)
+  - 스냅샷은 **읽기 전용 pull만** 수행(업로드/원격 실행 범위 확장 금지)
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-PC-032: Strategy A 유지 + A+(cutover_ts=next bucket) 고정, DB 다운로드 시간 갭 허용, 중기 B 가능 명시(이번 범위 구현 금지) ✅
+- Strategy A 유지: **DB Seed 다운로드 → DB 로드 → LIVE 연결**
+- DB 다운로드 시간(T) 동안 발생하는 데이터 갭은 **허용**한다.
+  - 근거: SSOT에서 PC 앱은 "정본 아님", REST 갭 복구도 Non-scope.
+- **A+ (필수 규칙)**:
+  - **DB에서 "마지막 캔들 1개는 폐기"**(진행 중일 수 있으므로)
+  - `cutover_ts`는 **폐기한 마지막 캔들의 다음 버킷 시작**으로 고정
+    - 예: `cutover_ts = (last_db_bucket_start + tf_ms)`
+  - 병합 규칙(경계 고정):
+    - `bucket_start < cutover_ts` → DB만 표시(고정)
+    - `bucket_start >= cutover_ts` → LIVE overlay만 표시(덮어씀)
+  - UI에는 `cutover_ts` 기준으로 **"LIVE 시작" 마커/텍스트**를 남긴다.
+- **"중기에는 B 가능" 문서 명시**:
+  - 중기 개선안으로 **Strategy B(WS 버퍼 선행 → DB 로드 → 병합)** 가능성을 SSOT에 명시
+  - **이번 작업 범위에서는 B 구현 금지**(범위 확장 방지)
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-PC-033: 실행 중 DB 교체는 Close→Swap(atomic)→Reopen 강제(Windows 파일 잠금 대응) ✅
+- Windows에서 열려 있는 DB 파일은 rename/move가 실패할 수 있으므로, 실행 중 업데이트는 반드시:
+  1. **DBReader Close(연결 완전 종료)**
+  2. **파일 교체(atomic swap)**
+     - 다운로드는 `*.tmp`로 받고
+     - "검증(오픈 가능)" 후
+     - 최종 파일로 rename(단, 1단계 Close가 선행되어야 함)
+  3. **DBReader Reopen(RO로 재오픈)**
+  4. UI에 "DB 갱신 성공/실패" 1줄 표기(스팸 금지, rate-limit)
+- 실패 폴백: 교체 실패 시 기존 DB 유지(또는 기존 DB로 재오픈) + 사용자에게 안내
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-PC-034: Passphrase GUI 입력 + Worker 처리, 이번 실행 동안만 메모리 보관(디스크 저장 금지) ✅
+- Passphrase 입력은 **GUI 다이얼로그**로 받는다.
+- 검증/SSH Pull은 반드시 **Worker Thread**에서 수행(메인 UI 스레드 블로킹 금지).
+- Passphrase 저장 정책:
+  - 기본: **"이번 실행 동안만 메모리 보관"**(앱 종료 시 폐기)
+  - 디스크 저장 금지(옵션으로도 금지; 요구 시 별도 DEC 필요)
+- 인터랙션 흐름(명시):
+  - 설정 화면에서:
+    - host/user/port/ppk 경로 입력
+    - "연결 테스트" 버튼
+    - ppk가 암호화된 경우 passphrase 다이얼로그 표시
+  - 테스트 성공 시에만 "저장" 활성화
+- **상태**: ✅ 확정 (2026-02-15)
+
+### DEC-PC-036: SSH timeout(연결 3s/전체 8s) 고정, 무한 대기/무한 재시도 금지(백오프만 허용) ✅
+- SSH/SCP 작업은 아래 타임아웃을 강제:
+  - 연결 시도 최대 3초
+  - 전체 Pull 작업 최대 8초(초과 시 강제 중단)
+- 재시도:
+  - 자동 무한 재시도 금지
+  - 사용자 버튼 또는 "주기 갱신"이 있다면 **백오프(예: 5s → 10s → 30s 상한)** 적용
+- 실패 시 UI:
+  - "DB 업데이트 실패(원인 요약)" 1줄 + 기존 DB 유지
+- **상태**: ✅ 확정 (2026-02-15)
 
 ---
 
@@ -867,6 +1058,697 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 
 ---
 
+## 🚧 PHASE 2.5 DETAILED WORK ORDER (STEP 1~8)
+
+> **출처**: "바로 실행 가능한 패키지(문서 1개 안에 STEP 1 → 1.5 → 2 → 3 → 5 → 8)" (2026-02-15 통합)  
+> **목적**: P0(WS 경고 오탐 제거) + P0(SSH 스냅샷 DB seed) + P1(A전략 cutover 병합) + UX(거래없음 표기) + Upbit API 키 연동 + LIVE 볼륨 틱 갱신  
+> **범위**: Phase 2.5 PC 앱 구현 작업지시서 (DEC-028~036 반영)
+
+### A) DECISION LOG (이번에 확정된 DEC 1~3)
+
+#### DEC-028 — DB 소스는 (C) SSH로 원격 파일 Pull (Read-Only)
+
+* PC 앱은 Cloud SQLite를 네트워크로 직접 열지 않는다.
+* 원격에서 **일관 스냅샷(snapshot sqlite 단일 파일)** 을 생성한 뒤, SSH/SCP로 로컬에 내려받아 **RO로 오픈**한다.
+* 실패 시: 기존 로컬 스냅샷을 유지(폴백), UI에 "DB 업데이트 실패"만 표기.
+
+#### DEC-029 — 동기화/병합은 우선 "전략 A"
+
+* **A(확정)**: DB seed 먼저 로드 → WS LIVE 연결 → `cutover_ts` 기준으로 LIVE 오버레이가 덮어쓴다.
+* **문서 명시(중기)**: 필요 시 **B(WS 버퍼 선행 → DB 로드 → 병합 → LIVE)** 로 전환 가능(이번 범위에서는 구현/의존 추가 금지).
+
+#### DEC-030 — UI 문구는 "시장정적" 금지, "거래없음" 사용
+
+* `last_message_age`는 장애 경고가 아니라 **"거래없음 n초"**(데이터 신선도) 표기용.
+* "연결 끊김/장애"는 **연결/heartbeat(L1/L2)** 로만 판단한다.
+
+#### DEC-031 — Upbit API 키는 Cloud의 freqtrade config.json에서 SSH로 읽어온다 (dry_run 게이트)
+
+* PC 앱은 Upbit API 키를 **로컬 파일/레지스트리/로그에 저장하지 않는다**(메모리 내에서만 보관).
+* Oracle Cloud(SSH: `152.69.234.80:22`)에 있는 Freqtrade 설정 파일에서 읽는다:
+  - 경로(실서버): `/home/opc/python/ft_userdata_upbit/user_data/config.json`
+  - Docker(일반): `ft_userdata/user_data/config.json`
+  - Docker(우리 프로젝트): `ft_userdata_upbit/user_data/config.json`
+* `config.json`의 `dry_run` 값으로 주문 기능을 게이트한다:
+  - `"dry_run": true` → **키를 읽지 않거나(선택), 읽더라도 주문 기능은 잠금(LOCK)**. UI에 `DRY_RUN: 주문 잠금` 명시.
+  - `"dry_run": false` → `exchange.key`, `exchange.secret`를 읽어 **PC 앱 내부 "주문 모듈 경계"로 전달**한다. 주문 전송은 PC에서 직접 수행.
+* SSH 인증은 **PuTTY 키(.ppk)를 그대로 사용**한다.
+* 키 노출 방지(필수):
+  - UI 표시는 마스킹(예: `****abcd`)만 허용.
+  - 로그에는 절대 평문을 남기지 않는다(에러 메시지에도 포함 금지).
+  - 메모리에서도 가능한 최소 범위로 유지(주문 모듈 초기화 이후 불필요하면 폐기).
+
+##### config.json 키 경로/구조 (고정 + 예외 처리 포함)
+
+* 필드 경로(기본, 고정):
+  - `dry_run` : boolean
+  - `exchange.name` : `"upbit"` (권장/검증용)
+  - `exchange.key` : string (Upbit Access Key)
+  - `exchange.secret` : string (Upbit Secret Key)
+* 예외 처리(실패 방식 고정):
+  - 파일 없음/SSH 실패/JSON 파싱 실패 → 주문 기능 `LOCK`, UI에 "키 로드 실패(원인 코드만)" 표시, 앱은 계속 구동.
+  - `dry_run` 누락/타입 불일치 → **안전 우선으로 `dry_run=true` 취급**(LOCK).
+  - `exchange` 누락 → LOCK.
+  - `exchange.key`/`exchange.secret` 누락 또는 빈 문자열 → LOCK.
+  - `exchange.name != upbit` → **FATAL(차단)**: "이 앱은 Upbit 전용입니다. config.json의 exchange.name을 upbit로 설정하세요."
+
+> 참고: 위 키 구조는 Freqtrade 문서의 일반적인 `config.json` 예시(`dry_run`, `exchange.key`, `exchange.secret`)를 따른다.
+
+#### DEC-032 — LIVE 모드에서 거래량(볼륨)도 틱 단위로 누적/갱신한다
+
+* 현재 PC 앱에서 **가격/캔들(분봉 포함)** 이 틱 단위로 움직이듯,
+* LIVE_ACTIVE에서 **거래량(볼륨) 막대도 동일한 틱 스트림으로 누적**되어야 한다.
+* 렌더링은 기존 정책을 따른다:
+  - 계산/집계는 every tick 반영
+  - UI는 coalesce(고정 주기)로 최신 스냅샷만 그림(중간 프레임 생략 가능)
+* DB_ONLY에서 볼륨은 DB history만 표시(틸트/보정 금지).
+
+#### DEC-033 — SSH 로그인/연결 설정 다이얼로그(필수)
+
+* SSH/SCP가 필요한 기능(원격 DB 스냅샷 pull, 원격 config.json 조회)이 있으므로,
+  **PC 앱 시작 시 "SSH 로그인/연결 설정" 창을 1회 표시**하는 것을 기본으로 한다.
+* 인증은 **PuTTY(.ppk) 그대로 사용**한다.
+  - (A) `.ppk + passphrase` (기본)
+  - (B) `.ppk + Pageant` 사용 시 passphrase 입력 생략(가능하면)
+  - (C) (옵션/후순위) password 로그인은 필요 시만(동일 UI 폼에서 선택)
+* 입력 필드(기본값 포함):
+  - host: `152.69.234.80`
+  - port: `22`
+  - username: `opc`
+  - ppk_path: (사용자 선택; PuTTY의 .ppk)
+  - passphrase: (옵션; **저장 금지**, 세션 메모리만)
+  - remote_config_path: `/home/opc/python/ft_userdata_upbit/user_data/config.json`
+* 동작/정책:
+  - "연결 테스트(Test)" 버튼 제공(비동기). 성공해야 "적용(Apply)" 활성화.
+  - "취소(Cancel)" 또는 테스트 실패 시: **SSH 기능 스킵 + 기존 로컬 스냅샷 유지(폴백)**, UI에 "SSH 미연결(로컬 DB 사용)" 표기.
+  - SSH 연결 실패/타임아웃으로 앱이 죽거나 멈추면 실패(프리징 금지).
+* 저장 정책(보안):
+  - config.json에는 **host/port/username/ppk_path/remote_path 같은 '비밀 아닌 설정'만 저장**한다.
+  - **passphrase/비밀번호는 절대 저장하지 않는다.**(평문 저장 금지, 로그 출력 금지)
+
+---
+
+### B) STEP 1 — Cursor 작업지시서 v1 (실행형)
+
+#### 1) Objective
+
+1. WS 경고 오탐 제거: "거래 없음"과 "연결 단절"을 분리한다.
+2. DB seed 구현: SSH Pull(RO)로 원격 스냅샷을 내려받아 로컬 DB를 seed로 사용한다.
+3. A전략 병합: `cutover_ts` 기준으로 DB history + LIVE overlay가 **중복/섞임 없이** 공존한다.
+4. UI 문구/표기: "거래없음 n초"로 데이터 신선도를 표시한다.
+5. SSH 로그인/연결 설정 UI: 앱 시작 시 SSH 설정을 받고, SSH 실패/취소 시 폴백으로 안전 동작한다.
+6. Upbit API 키 연동(준비): Cloud의 Freqtrade `config.json`에서 SSH로 읽고 `dry_run` 게이트로 주문 기능을 잠근다(키 평문 저장/로그 금지).
+7. LIVE 볼륨 틱 갱신: LIVE_ACTIVE에서 거래량 막대도 틱 단위 누적(렌더는 coalesce).
+
+#### 2) Scope / Non-scope
+
+**In-scope**
+
+* `pc_app/engine.py`: 상태/진단/모드/seed/merge 핵심
+* `pc_app/ui.py`: 상태칩/알림스트립/표기(거래없음/연결)
+* `pc_app/ui.py`: SSH 로그인/연결 설정 다이얼로그(UI) + 테스트/저장/폴백 표기(비동기)
+* `pc_app/pc_app_main.py`: DB 스냅샷 갱신 트리거/주기, UI 갱신(현 구조 유지 가능)
+* Upbit API 키 로딩/게이트(DEC-031) 및 주문 모듈 경계까지 "전달"을 `pc_app/engine.py`/`pc_app_main.py` 내에서 수행(새 의존성 추가 금지, PuTTY(.ppk) 그대로 사용).
+* LIVE 볼륨 틱 갱신(DEC-032) 반영은 `pc_app/engine.py`(스냅샷 생성) 및 `pc_app/ui.py`(볼륨 차트 렌더) 범위 내에서 수행.
+
+**Non-scope (이번 작업에서 금지)**
+
+* Cloud collector 코드/DB 스키마 변경
+* Supabase/HTTP REST 연동(원격 API) 추가
+* "전략 B" 구현(중기 계획으로만 문서 명시)
+* 대규모 UI 아키텍처 리팩토링(signal-slot 완전 전환 등)
+* 완전자동 주문/전략 자동화/시장가/스탑/예약/조건부 주문 구현(주문 기능은 "키 연동/게이트/경계"까지만)
+
+#### 3) Hard No (절대 금지)
+
+* `last_message_age`로 "연결 끊김" 판정
+* 네트워크 공유 경로로 SQLite 직접 오픈
+* TODO/임시 땜빵/Mock/stub 남기기
+* UI 메인 스레드에서 SSH/DB I/O 블로킹 수행
+* passphrase/비밀번호를 config.json에 저장하거나 로그로 출력
+* Upbit API 키(Access/Secret)를 로그/에러/파일에 평문으로 남기기
+* `dry_run=true` 인데 주문 기능을 "가능" 상태로 노출하기(반드시 LOCK)
+* paramiko 등 새 pip 의존성 추가(금지) — PuTTY Portable 번들만 허용(DEC-PC-031)
+* PuTTY 설치/PATH 요구(금지) — 번들 exe 절대경로로만 호출
+* DB가 열린 상태에서 rename/move로 교체 시도(금지) — Close→Swap→Reopen 강제(DEC-PC-033)
+* SSH 작업 무한 대기/무한 재시도(금지) — 타임아웃(3s/8s) + 백오프만 허용(DEC-PC-036)
+
+#### 4) 설계/상태 모델 (필수)
+
+##### 4.1 WS 상태(3계층 분리)
+
+* **L1 Connection**: `ws_connected`(bool 또는 enum)
+* **L2 Protocol health**: ping/pong 기반의 "alive"
+* **L3 Data freshness**: `last_trade_age_sec` → UI에 "거래없음 n초"
+
+##### 4.2 모드(최소 상태)
+
+* `DB_ONLY`: DB history만 표시
+* `LIVE_ACTIVE`: WS + overlay 표시(단, 병합 규칙은 `cutover_ts`가 핵심)
+
+> LIVE 관련 세부 모드(WARMUP/COOLDOWN)는 이번 범위에서 "틀만 남기고" 확장하지 말고, A전략 병합이 정확히 동작하는 데 집중.
+
+##### 4.3 주문 키/주문 가능 상태(최소 상태)
+
+* `ORDER_LOCKED_DRYRUN`: `dry_run=true` → 주문 기능 잠금(키는 읽지 않거나, 읽더라도 사용 금지)
+* `ORDER_KEYS_READY`: `dry_run=false` + 키 정상 로드 → 주문 모듈 경계까지 전달 완료(전송은 아직 Non-scope라도 "준비됨" 상태 표기 가능)
+* `ORDER_KEYS_ERROR`: 로드 실패/필드 누락/SSH 실패/파싱 실패 → 잠금(LOCK)
+
+UI 표기: `ORDER: LOCKED/READY/ERROR` 같은 중립 칩/문구(장애색 과다 사용 금지).
+
+#### 5) A전략 병합 규칙(이번 핵심)
+
+##### 5.1 CandleKey (캔들 병합 키)
+
+* `(symbol, timeframe_ms, bucket_start_ts_ms)`
+* `bucket_start_ts_ms = floor(trade_ts_ms / tf_ms) * tf_ms`
+  (recv time 금지)
+
+##### 5.2 cutover_ts 정의(전략 A)
+
+* DB seed 로드 직후, 각 `(symbol, timeframe)`에 대해:
+
+  * `last_db_bucket = DB에서 읽힌 마지막 캔들의 bucket_start_ts_ms`
+  * **cutover_ts = last_db_bucket**
+  * DB history에는 **`bucket_start < cutover_ts`** 만 유지(마지막 캔들은 "버림")
+  * LIVE overlay는 **`bucket_start >= cutover_ts`** 구간만 책임(덮어쓰기)
+
+> 이 규칙을 SSOT/작업지시서에 "경계 포함/미포함"까지 고정(반드시 그대로).
+
+##### 5.2.1 Strategy A+ (최종 규칙) — cutover_ts를 "다음 버킷 시작"으로 고정
+
+> 아래 A+ 규칙은 **DEC-PC-032(Strategy A+)**로 "확정"이며, 구현은 A+를 따른다.  
+> 위 5.2의 정의는 역사적/초기 정의로 남겨두되, **최종 경계는 A+ 기준**으로 고정한다.
+
+* DB seed 로드 직후, 각 `(symbol, timeframe)`에 대해:
+
+  * `last_db_bucket_start = DB에서 읽힌 마지막 캔들의 bucket_start_ts_ms`
+  * **DB의 마지막 캔들 1개는 폐기**(진행 중일 수 있으므로)
+  * **cutover_ts = (last_db_bucket_start + tf_ms)**  ← "다음 버킷 시작"으로 고정
+  * 병합 경계(문장으로 고정):
+    - `bucket_start < cutover_ts`  → DB만 표시(고정)
+    - `bucket_start >= cutover_ts` → LIVE overlay만 표시(덮어쓰기)
+  * UI에는 `cutover_ts` 기준으로 **"LIVE 시작" 마커/텍스트**를 남긴다.
+
+##### 5.3 섞임 방지
+
+* `context_id = (symbol, generation_id)`
+* `generation_id`는 WS 재연결마다 증가
+* UI는 "현재 generation_id"만 렌더(불일치 즉시 폐기)
+
+#### 6) SSH Pull 스냅샷 파이프라인(RO)
+
+##### 6.1 원격 스냅샷 생성(일관성 보장)
+
+* 원격에서 `ohlcv_short.sqlite`를 직접 scp하지 말고,
+* **원격에서 snapshot sqlite 단일 파일을 생성**한 뒤 pull
+  (WAL 모드 일관성 확보)
+
+##### 6.2 로컬 교체(원자적)
+
+* 임시 파일로 다운로드 → 간단 검증(예: 파일 존재/크기/오픈 가능) → atomic rename
+* 실패 시 기존 로컬 스냅샷 유지
+
+##### 6.3 오픈 방식
+
+* 로컬은 read-only로 오픈(가능하면 immutable 옵션도 활용)
+* DB 업데이트 중에도 앱이 "중간 파일"을 잡지 않도록 파일 교체는 원자적으로.
+
+##### 6.4 Upbit API 키 로딩(SSH) — 스냅샷 파이프라인과 분리
+
+* DB 스냅샷과 "키 로딩"은 동일한 SSH 채널을 공유할 수 있으나, 실패 격리는 분리한다:
+  - DB pull 실패 ≠ 키 로딩 실패 (서로 독립 실패로 UI 표시)
+  - 어느 쪽 실패든 앱은 계속 실행(LOCK/폴백)
+* 키 로딩은 "원격 파일 읽기(cat)" 또는 "작은 파일 pull" 방식 중 택1로 고정하되,
+  - PuTTY(.ppk) 그대로 사용이 가능한 방식이어야 한다(예: plink/pscp 기반).
+* 키/설정 파일은 반드시 UTF-8/JSON 파싱으로 처리하고, 파싱 실패 시 LOCK.
+
+##### 6.5 SSH 로그인/연결 설정 UX (필수)
+
+* SSH 설정이 필요한 경우(초기 실행/설정 없음/직전 실패/사용자 갱신 트리거)는,
+  **로그인/연결 설정 창을 먼저 띄워 SSH 세션을 확보**한 뒤에만 snapshot pull / config.json 조회를 시도한다.
+* 로그인창 요구사항:
+  - "Test(연결 테스트)"는 반드시 비동기(Worker)로 수행하고, 성공해야 Apply 가능
+  - Cancel/실패 시: SSH 관련 동작은 스킵하고 로컬 스냅샷으로 실행(폴백), UI에 실패/미연결 표기
+  - passphrase는 세션 메모리만 사용(저장/로그 금지)
+  - Pageant 사용 시 passphrase 입력을 생략할 수 있으면 그 경로를 우선(사용자 경험 개선)
+* UI 프리징 금지:
+  - 연결 테스트/파일 전송/원격 실행은 UI 스레드에서 동기 호출 금지(실패 시 즉시 중단/타임아웃)
+
+##### 6.6 PuTTY Portable 번들(필수) — 새 pip 의존성 추가 금지(DEC-PC-031)
+
+* paramiko 등 **새 pip 의존성 추가는 금지**한다(SSOT/Work Order 기준).
+* `.ppk`는 그대로 사용해야 하므로, **PuTTY Portable 바이너리 번들**을 채택한다:
+  - `pc_app/third_party/putty/puttygen.exe` : `.ppk` 유효성/암호화 여부 확인(필요 시 변환)
+  - `pc_app/third_party/putty/pscp.exe` : snapshot sqlite / config.json pull(RO)
+  - (선택) `pc_app/third_party/putty/plink.exe` : 원격 명령 실행이 필요할 때(예: snapshot 생성 스크립트 트리거)
+* "설치 + PATH 의존"은 금지한다. 항상 **번들된 exe의 절대경로**로 subprocess를 호출한다.
+* 로그/보안:
+  - passphrase/키/명령어 전문(호스트 포함) 출력 금지(로그에 남기지 않는다)
+  - 키는 **메모리 상에서만** 유지(프로세스 종료 시 폐기)
+
+##### 6.7 SSH 타임아웃/재시도 정책(필수 수치 고정: DEC-PC-036)
+
+* SSH/SCP 작업 타임아웃을 하드 고정한다:
+  - 연결 시도 최대 **3초**
+  - 전체 Pull 작업 최대 **8초**(초과 시 강제 중단)
+* 자동 무한 재시도 금지:
+  - 사용자 버튼 또는 주기 갱신이 있다면 **백오프(예: 5s → 10s → 30s 상한)** 적용
+* 실패 시 동작:
+  - 기존 로컬 스냅샷 유지(폴백)
+  - UI에 "DB 업데이트 실패(원인 요약)" 1줄(스팸 금지, rate-limit)
+
+##### 6.8 실행 중 DB 스냅샷 교체 시퀀스(Windows lock 대응: DEC-PC-033)
+
+Windows에서 열려 있는 DB 파일은 rename/move가 실패할 수 있으므로, 실행 중 업데이트는 반드시:
+
+1) **DBReader Close(연결 완전 종료)**  
+2) **파일 교체(atomic swap)**  
+   - 다운로드는 `*.tmp`로 받고  
+   - "검증(오픈 가능)" 후  
+   - 최종 파일로 rename(단, 1단계 Close가 선행되어야 함)  
+3) **DBReader Reopen(RO로 재오픈)**  
+4) UI에 "DB 갱신 성공/실패" 1줄 표기(스팸 금지, rate-limit)
+
+* 실패 폴백: 교체 실패 시 기존 DB 유지(또는 기존 DB로 재오픈) + 사용자 안내
+
+#### 7) UI/표기 요구사항
+
+* 연결 상태 표기(예: WS 칩):
+  * DISCONNECTED: L1/L2 실패 시만
+  * CONNECTED: L1/L2 OK
+* 데이터 신선도 표기:
+  * "거래없음 n초" (L3)
+  * 이 표기는 **경고색/장애색과 분리**(중립 정보)
+* 경고 스트립:
+  * **디바운싱 3초**: 끊김 조건이 3초 지속될 때만 표시
+  * OK↔WARN 출렁임 깜빡임 제거
+* 주문 키/주문 가능 상태 표기(DEC-031):
+  * `dry_run=true` → `ORDER: LOCKED (DRY_RUN)` 고정 표기
+  * 키 로드 실패/필드 누락 → `ORDER: ERROR (KEY LOAD)` 표기(원인 코드만)
+  * 키 정상 → `ORDER: READY` 표기(키는 마스킹)
+* LIVE 볼륨 틱 갱신(DEC-032):
+  * LIVE_ACTIVE에서 마지막 봉의 볼륨 막대가 틱마다 누적되는 것이 "체감"되어야 한다(렌더는 coalesce).
+  * 가격/캔들 갱신과 볼륨 갱신이 분리되어 "가격은 움직이는데 볼륨은 멈춰 보이는" 현상 금지.
+
+#### 8) Definition of Done (측정 가능)
+
+* 앱 시작 직후 "거래가 없어도" WS 경고가 뜨지 않는다(대신 "거래없음 n초"만 표시)
+* WS 실제 끊김 시: 3초 지속 후에만 경고 표시
+* DB seed가 존재하면: 차트가 DB history로 채워진 뒤 LIVE 전환 가능
+* A전략 병합으로:
+  * `bucket_start < cutover_ts` 는 DB만
+  * `bucket_start >= cutover_ts` 는 LIVE만
+  * 중복/섞임(거래량 2배 등) 없음
+* `dry_run=true`일 때 주문 기능은 항상 LOCK이고, 키 평문이 로그/파일에 남지 않는다.
+* LIVE_ACTIVE에서 가격/캔들뿐 아니라 **볼륨 막대도 틱 단위로 누적**되는 것이 UI에서 확인된다(렌더는 coalesce여도 "증가"가 보임).
+* SSH 설정이 없으면: 앱 시작 시 로그인/연결 설정 창이 뜨고, Cancel/실패해도 앱은 로컬 스냅샷으로 정상 구동한다(폴백).
+* passphrase/비밀번호는 저장/로그 출력되지 않는다.
+
+---
+
+### C) STEP 1.5 — Gemini 품질 감사관 질문 리스트(질문만)
+
+[BLOCKER]
+
+1. DB 스냅샷 생성 방식이 "원격에서 snapshot 파일 생성 후 pull"로 고정되었는가? (WAL 모드 일관성 보장)
+2. A전략 병합 규칙의 경계가 문서에 명확히 고정되었는가? (`< cutover_ts` vs `>= cutover_ts`)
+3. `last_message_age`가 연결 경고 판정에 사용되지 않도록 "L1/L2 vs L3" 분리가 코드 레벨로 강제되었는가?
+4. UI 경고 디바운싱(3초)이 실제로 적용되어 깜빡임/알람 피로가 제거되는가?
+5. SSH/DB I/O가 UI 스레드를 블로킹하지 않는가?
+6. `dry_run=true`일 때 주문 기능이 **반드시 LOCK**되고, 키 로딩/전달이 우회되지 않는가?
+7. Upbit API 키가 로그/에러/파일로 유출될 여지가 없는가(마스킹/예외 메시지 포함)?
+8. `config.json` 필드 경로(`dry_run`, `exchange.key`, `exchange.secret`) 누락/타입 불일치 시 "안전 우선 LOCK"으로 떨어지는가?
+9. LIVE_ACTIVE에서 볼륨 막대가 틱 누적되며, cutover 병합 때문에 "볼륨 2배(중복)"가 재발하지 않는가?
+10. SSH 로그인/연결 설정 창이 '초기/미설정/실패/사용자 갱신 트리거' 조건에서 반드시 뜨고, Cancel/실패 시 폴백(로컬 스냅샷)으로 안전하게 진행되는가?
+11. passphrase/비밀번호가 config.json/로그에 저장되지 않도록 금지 규칙이 코드 레벨로 지켜지는가?
+
+[MAJOR]
+
+6. "거래없음 n초" 표기가 경고/장애와 동일한 색/표현 체계를 사용하지 않는가?
+7. WS 재연결 시 generation_id 증가 및 context_id mismatch 폐기가 UI 렌더링에 반영되는가?
+8. DB 스냅샷 pull 실패 시 폴백(기존 로컬 DB 유지) 정책이 명확한가?
+9. 키 로딩 실패와 DB pull 실패가 UI/로그에서 구분되어 진단 가능하게 남는가?
+
+[MINOR]
+
+9. "중기 계획에서 B 전략 가능"이 문서에 명시되었는가(단, 이번 범위 구현 금지)?
+10. 스냅샷 교체가 원자적(atomic)인지, 중간 파일 잡는 레이스가 없는지?
+11. `exchange.name != upbit` 일 때 경고 표기는 과하지 않고(알람 피로), 사용자가 원인을 이해할 수 있는가?
+
+핸드오프 6줄:
+
+* 무엇을 했다(변경점):
+* 왜 이렇게 했나(결정 근거):
+* 유지해야 할 방향(Keep):
+* 피해야 할 함정(Avoid):
+* 다음 단계(Next):
+* SSOT/Task 위치:
+
+---
+
+### C-2) STEP 1.5 QA 질문 응답 및 확정 결정서 (STEP 2 / v1.0)
+
+아래는 **STEP 1.5 QA 질문 1~9에 대한 "결정/답변"을 제가 알아서 채운** **STEP 2 확정본(문서 1장짜리)**입니다.
+이걸 그대로 SSOT Decision Log + Phase 2.5 Work Order에 붙여넣으면 됩니다. (전제: **Strategy A 유지**, 단 **중기 B 가능** 명시)
+
+#### 0) 결론 요약
+
+* **Q1(SSH/PPK 의존성 충돌)**: "새 pip 의존성 추가"는 하지 않는다. 대신 **PuTTY Portable 바이너리(puttygen/pscp)** 를 **pc_app 하위에 번들**하여 `.ppk`를 그대로 지원한다. (외부 설치/ PATH 요구 금지)
+* **Q2(Strategy A 데이터 갭)**: **갭은 허용**한다(PC App은 정본 아님). 대신 **A를 '버킷 경계(start next bucket)'로 고정**해 "부분 캔들/볼륨 급락" 혼란을 최소화하고, UI에 "LIVE 시작 구간" 표시를 남긴다. 중기엔 B로 개선 가능함을 문서에 명시한다.
+* **Q3(Windows 파일 잠금/DB 교체)**: 실행 중 DB 업데이트는 **Close → Swap(atomic) → Reopen** 시퀀스를 강제한다(락 잡은 상태 rename 금지).
+* 나머지(4~9)도 아래처럼 **운영 가능한 수준으로 결정을 고정**한다.
+
+#### 1) DEC-PC-031 — SSH/PPK 구현 방식 확정(의존성 충돌 해결)
+
+**결론**
+
+* **pip 새 의존성(paramiko 등) 추가 금지 유지**
+* **PuTTY Portable 번들 채택**:
+  * `puttygen.exe` : `.ppk` 확인/검증(필요 시 변환)
+  * `pscp.exe` : 스냅샷 파일 Pull 전용(RO)
+* 번들은 `pc_app/third_party/putty/` 아래에 포함(PC 앱 범위 내 신규 파일은 허용).
+* 사용자는 **.ppk 파일만 제공**하면 된다(기존 요구사항 유지).
+
+**이유(운영 관점)**
+
+* `.ppk` 직접 처리를 표준 라이브러리로 해결 불가
+* PuTTY를 "설치+PATH"로 강제하면 숨은 의존성/운영 사고가 발생
+* 번들 방식이 가장 재현 가능하고 운영 안정적
+
+**보안/로그**
+
+* passphrase/키/명령어 출력 금지(로그에 남기지 않는다)
+* 스냅샷은 **읽기 전용 pull만** 수행(업로드/원격 실행 범위 확장 금지)
+
+#### 2) DEC-PC-032 — Strategy A의 "연결 순서/갭" 처리 방침 확정
+
+**결론**
+
+* Strategy A 유지: **DB Seed 다운로드 → DB 로드 → LIVE 연결**
+* DB 다운로드 시간(T) 동안 발생하는 데이터 갭은 **허용**한다.
+  * 근거: SSOT에서 PC 앱은 "정본 아님", REST 갭 복구도 Non-scope.
+* 단, UX/정합성 혼란을 줄이기 위해 **A를 다음처럼 'A+'로 고정**한다:
+
+**A+ (필수 규칙)**
+
+* **DB에서 "마지막 캔들 1개는 폐기"**(진행 중일 수 있으므로)
+* `cutover_ts`는 **폐기한 마지막 캔들의 다음 버킷 시작**으로 고정
+  * 예: `cutover_ts = (last_db_bucket_start + tf_ms)`
+* 병합 규칙(경계 고정):
+  * `bucket_start < cutover_ts` → DB만 표시(고정)
+  * `bucket_start >= cutover_ts` → LIVE overlay만 표시(덮어씀)
+* UI에는 `cutover_ts` 기준으로 **"LIVE 시작" 마커/텍스트**를 남긴다.
+
+**"중기에는 B 가능" 문서 명시**
+
+* 중기 개선안으로 **Strategy B(WS 버퍼 선행 → DB 로드 → 병합)** 가능성을 SSOT에 명시
+* **이번 작업 범위에서는 B 구현 금지**(범위 확장 방지)
+
+#### 3) DEC-PC-033 — 실행 중 DB 스냅샷 교체(Windows 파일 잠금) 시퀀스 확정
+
+**결론**
+
+Windows에서 열려 있는 DB 파일은 rename/move가 실패할 수 있으므로, 실행 중 업데이트는 반드시:
+
+1. **DBReader Close(연결 완전 종료)**
+2. **파일 교체(atomic swap)**
+   * 다운로드는 `*.tmp`로 받고
+   * "검증(오픈 가능)" 후
+   * 최종 파일로 rename(단, 1단계 Close가 선행되어야 함)
+3. **DBReader Reopen(RO로 재오픈)**
+4. UI에 "DB 갱신 성공/실패" 1줄 표기(스팸 금지, rate-limit)
+
+**실패 폴백**
+
+* 교체 실패 시: 기존 DB 유지(또는 기존 DB로 재오픈) + 사용자에게 안내
+
+#### 4) DEC-PC-034 — Passphrase 입력/검증 UX (UI 프리징 0)
+
+**결론**
+
+* Passphrase 입력은 **GUI 다이얼로그**로 받는다.
+* 검증/SSH Pull은 반드시 **Worker Thread**에서 수행(메인 UI 스레드 블로킹 금지).
+* Passphrase 저장 정책:
+  * 기본: **"이번 실행 동안만 메모리 보관"**(앱 종료 시 폐기)
+  * 디스크 저장 금지(옵션으로도 금지; 요구 시 별도 DEC 필요)
+
+**인터랙션 흐름(명시)**
+
+* 설정 화면에서:
+  * host/user/port/ppk 경로 입력
+  * "연결 테스트" 버튼
+  * ppk가 암호화된 경우 passphrase 다이얼로그 표시
+* 테스트 성공 시에만 "저장" 활성화
+
+#### 5) DEC-PC-035 — LIVE 전환 시 '볼륨 0부터' 문제 처리
+
+**결론**
+
+* 위의 **A+ (cutover_ts를 다음 버킷 시작으로 고정)**으로 해결한다.
+  * LIVE가 DB의 "진행 중 캔들"을 덮어쓰지 않으므로,
+  * DB 누적 볼륨을 LIVE에 seed 주입할 필요가 없다.
+* 따라서 "볼륨 급락"은 구조적으로 최소화되며,
+* 만약 표시상 공백이 생기면 그것은 **허용된 갭**이며 "LIVE 시작 마커"로 설명한다.
+
+(참고: "같은 버킷에 덧칠" 방식은 Strategy B 계열이므로 이번 범위에서는 금지)
+
+#### 6) DEC-PC-036 — SSH 네트워크 무한 대기 방지(Timeout/재시도)
+
+**결론(필수 수치 고정)**
+
+* SSH/SCP 작업은 아래 타임아웃을 강제:
+  * 연결 시도 최대 3초
+  * 전체 Pull 작업 최대 8초(초과 시 강제 중단)
+* 재시도:
+  * 자동 무한 재시도 금지
+  * 사용자 버튼 또는 "주기 갱신"이 있다면 **백오프(예: 5s → 10s → 30s 상한)** 적용
+* 실패 시 UI:
+  * "DB 업데이트 실패(원인 요약)" 1줄 + 기존 DB 유지
+
+#### 7) Q7 답변 — exchange.name이 upbit가 아닐 때(경고 vs 차단)
+
+**결론**
+
+* 현재 프로젝트는 **Upbit 전용**이므로:
+  * `exchange.name != "upbit"`이면 **차단(Fatal)**
+  * 이유/조치 안내:
+    * "이 앱은 Upbit 전용입니다. config.json의 exchange.name을 upbit로 설정하세요."
+* "경고만" 허용은 향후 다거래소 범위 확정 시 별도 DEC로 다룬다(현재 Non-scope).
+
+#### 8) Q8 답변 — DB 스냅샷 없는 Cold Start에서 cutover_ts 정의
+
+**결론**
+
+* DB 스냅샷이 없으면 `DB_ONLY`는 불가 → **LIVE_ONLY로 시작**
+* `cutover_ts`는 "DB 기반 병합"의 기준점이므로 **미정(None)** 으로 둔다.
+* UI에 "DB 없음(Cold Start)" 상태를 명확히 표기하고,
+* 사용자가 "DB Pull"을 실행해 스냅샷이 생기는 시점부터 A+ 규칙을 적용한다.
+
+#### 9) Q9 답변 — SSH 정보 변경/ppk 경로 불일치 처리
+
+**결론**
+
+* config.json에 저장된 SSH 정보가 변경되면:
+  * 자동으로 조용히 실패하지 말고,
+  * "설정 불일치/검증 필요" 배지 표시
+* ppk 경로가 깨졌거나 host/user가 바뀌었으면:
+  * 설정 화면을 열어 재검증(연결 테스트) 후 저장
+* 이전 정상 설정은 즉시 삭제하지 않고 유지(단, "현재 설정 불능" 표시)
+
+#### 10) 추가 정보 요청에 대한 확정 답변
+
+* 타겟 OS: **Windows 10/11 전용**(현재 범위에서 Mac/Linux 지원 없음)
+* SSH 방식: **paramiko 추가 불허**, **PuTTY Portable 번들 + subprocess** 확정
+
+#### 11) 문서 반영 지시(SSOT/Work Order에 무엇을 추가할지)
+
+SSOT v3.4 Decision Log에 아래를 누적:
+
+* DEC-PC-031: PuTTY Portable 번들(puttygen/pscp)로 .ppk 지원, pip 의존성 추가 없음
+* DEC-PC-032: Strategy A 유지 + A+(cutover_ts=next bucket) 고정, 갭 허용, 중기 B 가능 명시
+* DEC-PC-033: 실행 중 DB 교체는 Close→Swap→Reopen 강제(Windows lock 대응)
+* DEC-PC-034: Passphrase GUI 입력 + Worker 처리, 메모리 보관만
+* DEC-PC-036: SSH timeout(3s/8s) 고정, 무한대기 금지
+
+Work Order(구현 지시서)에는:
+
+* 병합 경계(`< cutover_ts` / `>= cutover_ts`)를 **문장으로 고정**
+* DB 업데이트 시퀀스(Close→Swap→Reopen) **필수 절차로 명시**
+
+#### 핸드오프 6줄
+
+* 무엇을 했다(변경점): STEP 1.5에서 제기된 1~9번 질문에 대해 운영 가능하도록 결정을 고정(DEC-PC-031~036)하고, Work Order/SSOT에 반영할 문구를 마련했습니다.
+* 왜 이렇게 했나(결정 근거): 숨은 의존성/Windows 파일 잠금/데이터 갭/Passphrase UI 프리징은 24/7 운영에서 P0 사고 포인트이므로 사전에 결정으로 봉인하기 위함입니다.
+* 유지해야 할 방향(Keep): Strategy A(우선) + 중기 B 가능 명시, L1/L2/L3 분리, "거래없음" 표기, SSH Pull(RO).
+* 피해야 할 함정(Avoid): PuTTY 설치/PATH 강제, last_message_age로 연결 경고, 열린 DB 파일 rename 시도, UI 스레드에서 SSH/DB I/O.
+* 다음 단계(Next): 이 결정서를 기준으로 Cursor가 STEP4 구현(SSH pull/DB swap/WS 상태 분리/UI 표기)을 진행하고, Claude STEP5 혹독 리뷰로 Must Fix를 정리합니다.
+* SSOT/Task 위치: SSOT v3.4 Decision Log(DEC-PC-031~036 추가) + `pc_app/engine.py`, `pc_app/ui.py`, `pc_app_main.py` 작업지시서.
+
+---
+
+### D) STEP 2 — Cursor 작업지시서 v2(확정본)
+
+> STEP 1의 내용을 그대로 "확정본"으로 채택하되, 아래 3가지를 **문서에 명시적으로 추가**하고 고정한다.
+
+#### v1 → v2 확정 변경 3개
+
+1. DEC-029 문구 추가: "우선 A, 중기에는 B 가능(이번 범위 구현 금지)"
+2. DEC-030 문구 추가: "시장정적 금지, 거래없음 사용"
+3. SSH 스냅샷 파이프라인에서 "원격 snapshot 파일 생성 → pull"을 **강제**(WAL 리스크 차단)
+
+#### v2에 "추가로 고정"된 운영 결정(DEC-PC-031~036)
+
+아래는 STEP 1.5 QA에서 확정된 운영 결정을 v2(확정본)에 **누적**한다(범위 확장 아님, 구현 난이도만 봉인):
+
+1. **DEC-PC-031**: `.ppk` 지원은 **PuTTY Portable 번들(puttygen/pscp) + subprocess**로 해결(새 pip 의존성 추가 금지).
+2. **DEC-PC-032**: Strategy A 유지 + **A+(cutover_ts=next bucket)** 고정, DB 다운로드 시간 갭 허용, 중기 B 가능 명시(이번 구현 금지).
+3. **DEC-PC-033**: 실행 중 DB 교체는 **Close→Swap(atomic)→Reopen** 강제(Windows lock 대응).
+4. **DEC-PC-034**: Passphrase는 **GUI 입력** + Worker 처리, **이번 실행 동안만 메모리 보관**, 디스크 저장 금지.
+5. **DEC-PC-036**: SSH 타임아웃(연결 3s / 전체 8s) 고정, 무한 대기/무한 재시도 금지(백오프만 허용).
+6. **Q7**: `exchange.name != "upbit"`이면 Fatal(Upbit 전용).
+7. **Q8**: DB 스냅샷 없는 Cold Start는 LIVE_ONLY로 시작, `cutover_ts=None`(DB Pull 후 A+ 적용).
+8. **Q9**: SSH 정보/ppk 경로 불일치 시 "설정 불일치/검증 필요" 배지 + 연결 테스트 재검증 흐름 강제.
+
+이 외 스펙/범위 변경 없음(범위 확장 금지).
+
+핸드오프 6줄:
+
+* 무엇을 했다(변경점): v1을 v2로 확정하면서 DEC-028/029/030을 문서에 고정 반영함.
+* 왜 이렇게 했나(결정 근거): 오탐/무결성/스냅샷 일관성이 P0이기 때문.
+* 유지해야 할 방향(Keep): L1/L2/L3 분리, A cutover 경계 고정, SSH pull RO 원칙.
+* 피해야 할 함정(Avoid): last_message_age로 끊김 판단, WAL 메인파일만 scp, 경계 모호성.
+* 다음 단계(Next): Cursor 구현(STEP4)로 이동.
+* SSOT/Task 위치: SSOT v3.4 Decision Log에 DEC-028~030 누적.
+
+---
+
+### E) STEP 3 — SSOT/Task 갱신용 "붙여넣기 블록"
+
+SSOT Decision Log에 아래를 그대로 누적:
+
+* DEC-028: DB 소스는 SSH Pull snapshot(RO)
+* DEC-029: 동기화 A 확정, 중기 B 가능(이번 범위 금지)
+* DEC-030: UI 표기는 "거래없음", 시장정적 금지. last_message_age는 신선도 지표.
+* DEC-031: Upbit API 키는 Cloud의 freqtrade config.json에서 SSH로 읽고, dry_run으로 주문 기능 게이트(키 평문 저장/로그 금지, PuTTY .ppk 그대로 사용).
+* DEC-032: LIVE_ACTIVE에서 볼륨 막대도 틱 단위로 누적/갱신(렌더는 coalesce).
+* DEC-033: SSH 로그인/연결 설정 UI(앱 시작 시 1회, 미설정/실패 시 재요청), passphrase 저장 금지, Cancel/실패 시 안전한 폴백 및 안내(블로킹 금지). 실패 시 로컬 스냅샷 폴백.
+* DEC-PC-031: PuTTY Portable 번들(puttygen/pscp)로 .ppk 지원, pip 의존성 추가 없음(설치/PATH 강제 금지).
+* DEC-PC-032: Strategy A 유지 + A+(cutover_ts=next bucket) 고정, DB 다운로드 시간 갭 허용,중기 B 가능 명시(이번 범위 구현 금지).
+* DEC-PC-033: 실행 중 DB 교체는 Close→Swap(atomic)→Reopen 강제(Windows 파일 잠금 대응).
+* DEC-PC-034: Passphrase GUI 입력 + Worker 처리, 이번 실행 동안만 메모리 보관(디스크 저장 금지).
+* DEC-PC-036: SSH timeout(연결 3s/전체 8s) 고정, 무한 대기/무한 재시도 금지(백오프만 허용).
+
+Risk Register 업데이트(요약):
+
+* RISK-PC-007: SQLite WAL 스냅샷 불일관 → "원격 snapshot 생성 후 pull"로 완화
+* RISK-PC-008: cutover 경계 모호성 → `<`/`>=` 경계 규칙을 문서로 고정하여 완화
+* RISK-PC-009: 알람 피로 → L1/L2/L3 분리 + 3초 디바운싱으로 완화
+* RISK-ORDER-KEY-001: Upbit 키 유출/로컬 저장 → "메모리 전용 + 마스킹 + 로그 금지 + dry_run LOCK"으로 완화
+* RISK-SSH-LOGIN-001: SSH passphrase 취급 오류/평문 저장/로그 노출 → "저장 금지 + 마스킹 + 로그 금지 + UI/Worker 분리"로 완화
+* RISK-SSH-DEP-001: SSH/PPK 처리에서 숨은 의존성/설치 문제 → "PuTTY Portable 번들 + 절대경로 호출(설치/PATH 금지)"로 완화(DEC-PC-031)
+* RISK-SSH-HANG-001: SSH Pull 무한 대기/프리징 → "타임아웃(3s/8s) + 무한 재시도 금지 + 백오프"로 완화(DEC-PC-036)
+* RISK-ORDER-KEY-002: config.json 필드 변동/누락 → "필드 경로 고정 + 예외처리(누락/타입/빈값) + exchange.name 강제(upbit) + dry_run 게이트 + 누락 시 안전 LOCK + UI 원인 코드 표기"로 완화
+* RISK-PC-VOL-001: LIVE 볼륨 갱신이 끊겨 체감 저하 → "tick 누적 + coalesce 렌더"로 완화
+
+Open Questions(남기기):
+
+* 스냅샷 pull 주기(버튼/주기/조건부)
+* "거래없음" 표기 임계치(색/표현 수준 포함)
+* 키 로딩 트리거/주기: 앱 시작 1회인지, 주문 탭 진입 시인지, N분 갱신인지(보안/UX 균형)
+* PuTTY passphrase UX: 매 실행 입력 vs Pageant 권장 안내 문구
+
+---
+
+### F) STEP 5 — Claude 혹독 리뷰 체크리스트(구조화)
+
+**Must Fix**
+
+* L1/L2/L3 분리 위반(특히 last_message_age로 연결 경고)
+* cutover 경계 규칙이 코드에서 흔들림(<=, < 혼재)
+* SSH/DB I/O가 UI 스레드 블로킹
+* 스냅샷 교체가 원자적이지 않아 "중간 파일"을 잡을 가능성
+* generation_id/context_id mismatch가 렌더링에 반영되지 않음
+* Upbit API 키가 로그/예외/디버그 출력으로 유출될 가능성
+* dry_run=true 인데 ORDER가 READY로 뜨는 상태(게이트 우회)
+* LIVE 볼륨이 cutover 병합/스냅샷 갱신으로 인해 이중집계(2배)되거나, 반대로 멈춰 보이는 현상
+
+**Should Fix**
+
+* 경고 디바운싱 누락/부정확(깜빡임)
+* 스냅샷 pull 실패 시 폴백/표기 미흡
+* 로그 스팸(레이트리밋 부족)
+* 키 로딩 실패/DB pull 실패가 구분되지 않아 진단이 어려움
+* ORDER 상태 표기가 과도한 경고색/깜빡임으로 "알람 피로" 유발
+
+**Questions**
+
+* 스냅샷 pull 주기/트리거 정책은 무엇인가?
+* "거래없음" 표기 임계치/표현은 어디에 고정할 것인가?
+* 키 로딩(SSH) 방식은 plink/pscp 기반으로 고정할 것인가(=ppk 그대로), 또는 paramiko가 ppk를 직접 읽는 버전 고정이 가능한가?
+
+**Risks**
+
+* 스냅샷 주기가 과하면 네트워크/디스크 부담
+* 너무 잦은 UI 갱신 + 락 경합 → 프리징 가능성(향후 P2 최적화 필요)
+* 키 로딩을 너무 자주 하면 보안/UX 악화(패스프레이즈 반복 입력), 너무 적게 하면 운영 중 키 변경 반영 지연
+
+---
+
+### G) STEP 8 — 운영 체크(경량) 5+5+5
+
+#### P0 테스트 시나리오
+
+1. 거래 공백(>30초)인데 WS는 살아있음 → 경고 뜨면 실패("거래없음"만 표시)
+2. WS 강제 끊김 → 3초 지속 후 경고 1회 표시(깜빡임 없음)
+3. 스냅샷 pull 성공 → DB history 표시 후 LIVE 전환, 중복/섞임 없음
+4. 스냅샷 pull 실패 → 기존 로컬 DB로 정상 구동(폴백), UI에 실패 표기
+5. WS 재연결 반복 → generation_id 증가, 이전 generation 데이터 렌더 금지
+6. `dry_run=true` 인 서버 config.json → ORDER가 반드시 LOCK, 키가 로드/표시/로그로 새지 않음
+7. `dry_run=false` + 키 존재 → ORDER READY(마스킹), 키 로딩 실패 시 ERROR로 전환되며 앱은 계속 구동
+8. LIVE_ACTIVE에서 볼륨 막대가 틱마다 증가(가격만 움직이고 볼륨이 멈춰 보이면 실패)
+
+#### 관측성 체크
+
+1. WS 연결 상태(L1/L2)와 거래없음(L3)이 분리 표기되는가
+2. reconnect_attempts / connected_since 기록되는가
+3. snapshot pull 성공/실패 로그(레이트리밋) 있는가
+4. cutover_ts 값이 진단 패널/로그로 확인 가능한가
+5. DB 오픈이 항상 RO로 되는가
+6. ORDER 상태(LOCK/READY/ERROR)와 원인 코드가 로그/진단 패널에서 확인 가능한가(키 평문 제외)
+
+#### 운영 문서 5줄
+
+1. DB는 "원격 snapshot 생성 후 pull"만 허용(메인 파일 단독 복사 금지)
+2. pull 실패 시: 기존 로컬 DB 유지 + 재시도는 수동/주기 정책에 따름
+3. WS 경고가 아닌데 "거래없음"이 길면: 시장 소강일 수 있음(연결 칩 확인)
+4. WS 경고 발생 시: 디바운싱 후 표시된 경고만 장애로 간주
+5. cutover 경계는 `<`/`>=` 규칙을 변경하면 중복/유령 캔들이 생길 수 있으니 금지
+6. 주문 키는 Cloud의 Freqtrade config.json에서만 읽고, PC 로컬 저장 금지(메모리 전용). dry_run=true면 항상 주문 잠금.
+7. SSH passphrase는 저장하지 않으며, 가능하면 Pageant(에이전트) 사용으로 입력 부담을 줄인다
+
+---
+
+### 마지막: "한 큐 실행" 순서(실제 운영 흐름)
+
+1. **이 문서의 STEP2(v2 확정본)**을 Cursor에 전달 → 구현(STEP4)
+2. 구현 산출물을 Claude로 STEP5 혹독 리뷰
+3. ChatGPT가 STEP6 통합결정 → Cursor가 STEP7 재적용
+4. STEP8 경량 운영 체크로 마무리
+
+---
+
+### 핸드오프 6줄(이 문서에 대한)
+
+* 무엇을 했다(변경점): DEC-028/029/030 확정 후, 실행 패키지를 STEP1~8 한 문서로 통합했다.
+* 왜 이렇게 했나(결정 근거): 한 번에 실행 가능하도록 "지시서/QA/리뷰/SSOT갱신/운영체크"를 묶어 드리프트를 차단하기 위함.
+* 유지해야 할 방향(Keep): SSH snapshot RO, A전략 cutover 경계 고정, L1/L2/L3 분리, "거래없음" 표기.
+* 피해야 할 함정(Avoid): last_message_age로 끊김 판정, WAL 메인파일만 scp, 경계 모호성, UI 스레드 I/O.
+* 다음 단계(Next): Cursor 구현(STEP4) 진행.
+* SSOT/Task 위치: SSOT v3.4 Decision Log + PC App Pending 항목에 DEC/Task로 누적.
+
+---
+
 ## 📦 BACKLOG (향후 작업)
 
 ### Phase 2 구현 🚧
@@ -950,6 +1832,13 @@ DB_ONLY → LIVE_WARMUP → LIVE_ACTIVE → LIVE_COOLDOWN → DB_ONLY
 **상세 변경 이력**: `ssot_update_history.md` 참조
 
 **최근 주요 변경**:
+- **v3.5 (2026-02-15)**: Phase 2.5 DETAILED WORK ORDER (STEP 1~8) 통합
+  - DEC-028~033 추가 (SSH Pull snapshot, API 키 연동, LIVE 볼륨 틱 갱신)
+  - DEC-PC-031~036 추가 (PuTTY 번들, Strategy A+, DB 교체 시퀀스, passphrase GUI, SSH timeout)
+  - DEC-027을 v1/v2로 구분 (기존 테마 규칙 유지 + 상세 작업지시서 추가)
+  - RISK-PC-007~009, RISK-ORDER-KEY-001~002, RISK-SSH-* 추가
+  - AC/DoD에 SSH, API 키, LIVE 볼륨 관련 항목 추가
+  - "바로 실행 가능한 패키지(STEP 1~8)" 문서 전체 통합
 - v3.3 (2026-02-12): diff-최소 가드레일 + PC 앱 Light/Dark 테마 규칙
 - v3.2 (2026-02-01): PC 앱 UI 보강 (축/좌표/DB 로드)
 - v3.1 (2026-01-28): Phase 2 P0 안정화 (PK 분리/flush 레이스/비공개 API)
@@ -1030,8 +1919,6 @@ python pc_app_main.py  # config.json 기반 실행
 
 ---
 
-**마지막 업데이트**: 2026-02-14 (v3.4)  
-**다음 단계**: PC 앱 Pending 기능 (BURST/cutover/재연결) → Phase 2 Cloud 구현  
-**상태**: Phase 2 구현 대기 🚧, Phase 2.5 기본 완료 ✅
-
-::contentReference[oaicite:0]{index=0}
+**마지막 업데이트**: 2026-02-15 (v3.5)  
+**다음 단계**: Phase 2.5 PC 앱 구현 (SSH Pull, API 키, LIVE 볼륨, WS 경고 오탐 제거) → Phase 2 Cloud 구현  
+**상태**: Phase 2 구현 대기 🚧, Phase 2.5 작업지시서 완료 ✅
