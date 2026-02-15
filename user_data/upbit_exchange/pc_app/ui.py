@@ -20,6 +20,8 @@ TIMEFRAME_LABELS = {
     86_400_000: "일봉",
 }
 
+KST_OFFSET_SEC = 9 * 3600
+
 
 THEME_LIGHT = {
     "bg-base": "#FFFFFF",
@@ -50,6 +52,13 @@ THEME_LIGHT = {
     "status-fail-medium": "rgba(192,38,211,0.12)",
     "status-inactive": "#9CA3AF",
 }
+
+
+def fmt_kst(ms: int, fmt: str = "%m/%d %H:%M:%S") -> str:
+    try:
+        return time.strftime(fmt, time.gmtime((int(ms) / 1000.0) + KST_OFFSET_SEC))
+    except Exception:
+        return "-"
 
 THEME_DARK = {
     "bg-base": "#0F1115",
@@ -223,7 +232,7 @@ class SshSettingsDialog(QtWidgets.QDialog):
         form.addRow("PPK 경로", ppk_box)
 
         form.addRow("", self.use_pageant_check)
-        form.addRow("Passphrase", self.passphrase_edit)
+        form.addRow("Passphrase(입력 가능)", self.passphrase_edit)
         form.addRow("Remote DB", self.remote_db_edit)
         form.addRow("Remote Snapshot", self.remote_snapshot_edit)
         form.addRow("Remote Config", self.remote_config_edit)
@@ -231,8 +240,8 @@ class SshSettingsDialog(QtWidgets.QDialog):
         layout.addLayout(form)
 
         info = QtWidgets.QLabel(
-            "보안 정책: passphrase는 디스크에 저장하지 않습니다. "
-            "이번 실행 동안 메모리에만 유지됩니다."
+            "보안 정책: passphrase는 디스크/명령줄에 저장·전달하지 않습니다. "
+            "SSH 인증은 Pageant에 로드된 키를 기본 경로로 사용합니다."
         )
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -505,6 +514,39 @@ class HeaderBar(QtWidgets.QFrame):
             btn.setChecked(sym == symbol)
         self.apply_theme()
 
+    def _order_reason_code(self, state: str, reason: str) -> str:
+        raw = str(reason or "").strip().upper()
+        if state == "ORDER_LOCKED_DRYRUN":
+            return "DRY_RUN"
+        if raw.startswith("CFG_PULL_FAIL"):
+            return "KEY_LOAD"
+        if raw in ("KEY_MISSING", "EXCHANGE_MISSING", "EXCHANGE_NAME_MISSING"):
+            return "NO_KEY"
+        if raw in ("PPK_NOT_FOUND",):
+            return "KEY_PATH"
+        if raw.startswith("EXCHANGE_NOT_UPBIT"):
+            return "CONFIG"
+        if raw in ("SSH_UNAVAILABLE",):
+            return "SSH"
+        if raw in ("OK",):
+            return "READY"
+        return raw[:14] if raw else "UNKNOWN"
+
+    def _render_order_chip(self, order_chip: StatusChip, snap: Dict[str, Any]) -> None:
+        state = str(snap.get("order_state", "ORDER_LOCKED_DRYRUN"))
+        reason = str(snap.get("order_reason", "INIT"))
+        code = self._order_reason_code(state, reason)
+        if state == "ORDER_KEYS_READY":
+            order_chip.setText("● ORDER: READY")
+            order_chip.set_kind("ok")
+            return
+        if state in ("ORDER_LOCKED_DRYRUN", "ORDER_KEYS_ERROR"):
+            order_chip.setText(f"● ORDER: LOCKED ({code})")
+            order_chip.set_kind("warn")
+            return
+        order_chip.setText(f"● ORDER: ERROR ({code})")
+        order_chip.set_kind("fail")
+
     def check_alert(self, diag: Dict[str, Any]) -> None:
         symbols = diag.get("symbols", {})
         bad = []
@@ -552,6 +594,8 @@ class HeaderBar(QtWidgets.QFrame):
             ws_chip.setText(f"● WS {ws_l1}/{ws_l2}")
             if ws_l1 == "CONNECTED" and ws_l2 == "ALIVE":
                 ws_chip.set_kind("ok")
+            elif ws_l1 == "CONNECTED" and (ws_l2.startswith("PARTIAL(") or ws_l2 in ("GLOBAL_SILENT", "RATE_LIMITED", "DEGRADED")):
+                ws_chip.set_kind("warn")
             elif ws_l1 in ("CONNECTING", "RECONNECTING", "RECONNECT_WAIT"):
                 ws_chip.set_kind("warn")
             else:
@@ -561,16 +605,7 @@ class HeaderBar(QtWidgets.QFrame):
             fresh_chip.setText(f"● 거래없음 {int(age)}초")
             fresh_chip.set_kind("neutral")
 
-            order_state = str(snap.get("order_state", "ORDER_LOCKED_DRYRUN"))
-            if order_state == "ORDER_KEYS_READY":
-                order_chip.setText("● ORDER READY")
-                order_chip.set_kind("ok")
-            elif order_state == "ORDER_LOCKED_DRYRUN":
-                order_chip.setText("● ORDER LOCKED")
-                order_chip.set_kind("warn")
-            else:
-                order_chip.setText("● ORDER ERROR")
-                order_chip.set_kind("fail")
+            self._render_order_chip(order_chip, snap)
 
         _set_pair(self.live_chip, self.ws_chip, self.fresh_chip, self.order_chip, left)
         _set_pair(
@@ -611,10 +646,17 @@ class CandleChartWidget(QtWidgets.QWidget):
     def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
         self._candles: List[Candle] = []
+        self._cutover_ts: Optional[int] = None
+        self._timeframe_ms: Optional[int] = None
         self.setMinimumHeight(280)
 
     def set_candles(self, candles: List[Candle]) -> None:
         self._candles = candles
+        self.update()
+
+    def set_markers(self, cutover_ts: Optional[int], timeframe_ms: Optional[int]) -> None:
+        self._cutover_ts = int(cutover_ts) if cutover_ts else None
+        self._timeframe_ms = int(timeframe_ms) if timeframe_ms else None
         self.update()
 
     def apply_theme(self) -> None:
@@ -668,6 +710,35 @@ class CandleChartWidget(QtWidgets.QWidget):
             top = min(y_for(c.open), y_for(c.close))
             h = max(1, abs(y_for(c.close) - y_for(c.open)))
             p.fillRect(QtCore.QRect(x, top, w, h), color)
+
+        # 장애 시에는 보간하지 않고 "갭"만 시각화해서 데이터 무결성 판단을 돕는다.
+        if self._timeframe_ms and len(candles) >= 2:
+            gap_threshold = float(self._timeframe_ms) * 1.5
+            gap_brush = parse_color(t["status-warn-dim"])
+            gap_pen = parse_color(t["status-warn"])
+            for i in range(1, len(candles)):
+                gap = candles[i].ts_ms - candles[i - 1].ts_ms
+                if gap <= gap_threshold:
+                    continue
+                x_prev = plot.left() + int((i - 1) * step)
+                x_curr = plot.left() + int(i * step)
+                left = min(x_prev, x_curr)
+                width = max(2, abs(x_curr - x_prev))
+                p.fillRect(QtCore.QRect(left, plot.top(), width, plot.height()), gap_brush)
+                p.setPen(gap_pen)
+                p.drawText(left + 2, plot.top() + 12, "GAP")
+
+        if self._cutover_ts is not None:
+            marker_index: Optional[int] = None
+            for i, candle in enumerate(candles):
+                if candle.ts_ms >= self._cutover_ts:
+                    marker_index = i
+                    break
+            if marker_index is not None:
+                x = plot.left() + int(marker_index * step)
+                p.setPen(parse_color(t["status-ok"]))
+                p.drawLine(x, plot.top(), x, plot.bottom())
+                p.drawText(x + 4, plot.top() + 12, f"LIVE 시작 {fmt_kst(self._cutover_ts, '%H:%M:%S')}")
 
         p.setPen(parse_color(t["chart-axis"]))
         for i in range(5):
@@ -807,6 +878,10 @@ class ChartArea(QtWidgets.QFrame):
 
         candles = snap.get("candles") or []
         self.chart.set_candles(candles)
+        self.chart.set_markers(
+            cutover_ts=snap.get("cutover_ts"),
+            timeframe_ms=int(tf_ms) if tf_ms else None,
+        )
         self.volume.set_candles(candles)
         if tf_ms:
             for i in range(self.tf_combo.count()):
@@ -958,9 +1033,10 @@ class EventTimeline(QtWidgets.QFrame):
 
 
 class DashboardPanel(QtWidgets.QFrame):
-    def __init__(self, event_store: EventStore, parent: Optional[QtWidgets.QWidget] = None) -> None:
+    def __init__(self, event_store: EventStore, engine, parent: Optional[QtWidgets.QWidget] = None) -> None:
         super().__init__(parent)
         self.event_store = event_store
+        self.engine = engine
         self.tiles = {
             "ws": KpiTile("WS 연결"),
             "db": KpiTile("DB Write Lag"),
@@ -969,9 +1045,16 @@ class DashboardPanel(QtWidgets.QFrame):
             "rate": KpiTile("수신율"),
             "err": KpiTile("에러율"),
         }
+        self.control_box = QtWidgets.QFrame()
+        self.control_symbol = QtWidgets.QComboBox()
+        self.live_btn = QtWidgets.QPushButton("LIVE 시작/유지")
+        self.db_btn = QtWidgets.QPushButton("DB로 전환(안정)")
+        self.ack_btn = QtWidgets.QPushButton("BURST 알림 ACK")
+        self.control_hint = QtWidgets.QLabel("-")
         self.connection = ConnectionSection()
         self.timeline = EventTimeline()
         self._build_ui()
+        self._connect_signals()
         ThemeManager.subscribe(self.apply_theme)
         self.apply_theme()
 
@@ -986,8 +1069,53 @@ class DashboardPanel(QtWidgets.QFrame):
         for i, key in enumerate(ordered):
             grid.addWidget(self.tiles[key], i // 2, i % 2)
         layout.addLayout(grid)
+        control_layout = QtWidgets.QVBoxLayout(self.control_box)
+        control_layout.setContentsMargins(10, 8, 10, 8)
+        control_layout.setSpacing(6)
+        head = QtWidgets.QLabel("운영 수동 제어")
+        control_layout.addWidget(head)
+        self.control_symbol.clear()
+        for symbol in ("KRW-BTC", "KRW-ETH", "KRW-XRP"):
+            self.control_symbol.addItem(DISPLAY_NAMES.get(symbol, symbol), symbol)
+        control_layout.addWidget(self.control_symbol)
+        row1 = QtWidgets.QHBoxLayout()
+        row1.addWidget(self.live_btn)
+        row1.addWidget(self.db_btn)
+        control_layout.addLayout(row1)
+        control_layout.addWidget(self.ack_btn)
+        self.control_hint.setWordWrap(True)
+        control_layout.addWidget(self.control_hint)
+        self.control_box.setProperty("box-title", head)
+        layout.addWidget(self.control_box)
         layout.addWidget(self.connection)
         layout.addWidget(self.timeline, 1)
+
+    def _connect_signals(self) -> None:
+        self.live_btn.clicked.connect(self._on_live_clicked)
+        self.db_btn.clicked.connect(self._on_db_clicked)
+        self.ack_btn.clicked.connect(self._on_ack_clicked)
+
+    def _selected_symbol(self) -> str:
+        symbol = self.control_symbol.currentData()
+        return str(symbol) if symbol else "KRW-XRP"
+
+    def _on_live_clicked(self) -> None:
+        self.engine.set_symbol_mode(self._selected_symbol(), "LIVE_ACTIVE")
+
+    def _on_db_clicked(self) -> None:
+        self.engine.set_symbol_mode(self._selected_symbol(), "DB_ONLY")
+
+    def _on_ack_clicked(self) -> None:
+        self.engine.acknowledge_burst_alert()
+
+    def _control_reason_text(self, reason: str) -> str:
+        mapping = {
+            "OK": "제어 가능",
+            "DB_SNAPSHOT_RUNNING": "DB 동기화 중에는 버튼이 잠깁니다.",
+            "WS_RECOVERING": "WS 복구 중에는 일부 버튼이 잠깁니다.",
+            "SYMBOL_NOT_FOUND": "심볼 상태를 찾을 수 없습니다.",
+        }
+        return mapping.get(reason, reason)
 
     def update_dashboard(self, diag: Dict[str, Any], snaps: Dict[str, Dict[str, Any]]) -> None:
         symbols = diag.get("symbols", {})
@@ -1000,21 +1128,53 @@ class DashboardPanel(QtWidgets.QFrame):
         reconnects = sum(
             1 for v in symbols.values() if str(v.get("ws_l1", "")) in ("RECONNECTING", "RECONNECT_WAIT")
         )
-        total_ticks = sum(int(v.get("total_ticks", 0)) for v in symbols.values())
         db_state = diag.get("db_snapshot", {})
         ssh_state = diag.get("ssh", {})
+        ws_rate_limit = diag.get("ws_rate_limit", {}) or {}
         self.tiles["ws"].set_data("OK" if ws_ok else "WARN", f"{len(symbols)} 심볼")
         self.tiles["db"].set_data(str(db_state.get("status", "IDLE")), "DB snapshot")
         self.tiles["recv"].set_data(f"{max_age:.1f}s", "max 거래없음")
         self.tiles["reconnect"].set_data(str(reconnects), "최근 상태")
-        self.tiles["rate"].set_data(f"{total_ticks}/s", "최근 추정")
+        self.tiles["rate"].set_data(
+            f"{ws_rate_limit.get('subscribe_window_1s', 0)}/s",
+            f"sub {ws_rate_limit.get('subscribe_window_1m', 0)}/m",
+        )
         self.tiles["err"].set_data(str(ssh_state.get("status", "UNCONFIGURED")), "SSH")
+        state = self.engine.get_manual_control_state(self._selected_symbol())
+        can_live = bool(state.get("can_live", False))
+        can_db = bool(state.get("can_db", False))
+        reason = str(state.get("reason", "OK"))
+        self.live_btn.setEnabled(can_live)
+        self.db_btn.setEnabled(can_db)
+        self.ack_btn.setEnabled(bool(state.get("can_ack", True)))
+        hint = self._control_reason_text(reason)
+        self.control_hint.setText(hint)
+        self.live_btn.setToolTip(hint if not can_live else "")
+        self.db_btn.setToolTip(hint if not can_db else "")
         self.connection.update_data(diag)
         self.timeline.update_events(self.event_store.recent(5))
 
     def apply_theme(self) -> None:
         t = ThemeManager.current()
         self.setStyleSheet(f"background:{t['bg-base']};")
+        self.control_box.setStyleSheet(
+            f"background:{t['bg-surface']}; border:1px solid {t['border-subtle']}; border-radius:6px;"
+        )
+        title = self.control_box.property("box-title")
+        if isinstance(title, QtWidgets.QLabel):
+            title.setStyleSheet(f"font-size:11px; font-weight:600; color:{t['text-primary']};")
+        self.control_symbol.setStyleSheet(
+            f"background:{t['bg-base']}; color:{t['text-primary']}; border:1px solid {t['border-subtle']}; border-radius:4px; padding:3px 6px;"
+        )
+        btn_style = (
+            f"QPushButton{{background:{t['bg-elevated']}; color:{t['text-primary']}; border:1px solid {t['border-subtle']};"
+            "border-radius:4px; padding:4px 8px; font-size:11px; font-weight:600;}"
+            f"QPushButton:disabled{{color:{t['text-quaternary']}; background:{t['bg-surface']};}}"
+        )
+        self.live_btn.setStyleSheet(btn_style)
+        self.db_btn.setStyleSheet(btn_style)
+        self.ack_btn.setStyleSheet(btn_style)
+        self.control_hint.setStyleSheet(f"font-size:10px; color:{t['text-tertiary']};")
 
 
 class FooterBar(QtWidgets.QFrame):
@@ -1040,8 +1200,15 @@ class FooterBar(QtWidgets.QFrame):
         uptime = int(time.time() - self._boot)
         mm = uptime // 60
         ss = uptime % 60
+        control_events = diag.get("control_events", [])
+        latest_event = ""
+        if control_events:
+            first = str(control_events[0])
+            latest_event = first.split("|", 1)[1].strip() if "|" in first else first
         self.label.setText(
-            f"● 거래없음 최대 {age:.1f}s | Reconnects {reconnects} | DB {db_state.get('status', 'IDLE')} | Uptime {mm}m {ss:02d}s"
+            f"● 거래없음 최대 {age:.1f}s | Reconnects {reconnects} | DB {db_state.get('status', 'IDLE')} | "
+            f"표시정책 최신 스냅샷 우선 | Uptime {mm}m {ss:02d}s"
+            + (f" | {latest_event}" if latest_event else "")
         )
 
     def apply_theme(self) -> None:
@@ -1093,7 +1260,7 @@ class Window2(QtWidgets.QMainWindow):
         self.setWindowTitle("Upbit Monitor - XRP + Dashboard")
         self.header = HeaderBar(show_tabs=True)
         self.xrp_area = ChartArea(engine, self.active_symbol)
-        self.dashboard = DashboardPanel(self.event_store)
+        self.dashboard = DashboardPanel(self.event_store, engine)
         self.footer = FooterBar()
 
         central = QtWidgets.QWidget()
@@ -1117,6 +1284,11 @@ class Window2(QtWidgets.QMainWindow):
     def _on_symbol_change(self, symbol: str) -> None:
         self.active_symbol = symbol
         self.xrp_area.set_symbol(symbol)
+        combo = self.dashboard.control_symbol
+        for i in range(combo.count()):
+            if combo.itemData(i) == symbol:
+                combo.setCurrentIndex(i)
+                break
 
     def update_dashboard(self, diag: Dict[str, Any], snaps: Dict[str, Dict[str, Any]]) -> None:
         self.event_store.update(diag, snaps)

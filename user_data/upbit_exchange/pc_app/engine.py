@@ -6,7 +6,6 @@ import logging.handlers
 import os
 import random
 import shlex
-import shutil
 import sqlite3
 import subprocess
 import threading
@@ -38,10 +37,14 @@ TIMEFRAMES_MS = [
 DEFAULT_TIMEFRAME_MS = 3_600_000
 DEFAULT_NO_TRADE_WARN_SEC = 3.0
 DEFAULT_SNAPSHOT_PULL_INTERVAL_SEC = 300
-SSH_CONNECT_TIMEOUT_SEC = 3
 SSH_TOTAL_TIMEOUT_SEC = 8
 RECONNECT_BASE_STEPS = (5.0, 10.0, 20.0, 30.0)
 RECONNECT_COOLDOWN_EVERY = 6
+WS_SILENT_BASE_SEC = 12.0
+WS_PARTIAL_RESUB_COOLDOWN_SEC = 5.0
+WS_PARTIAL_RECONNECT_GRACE_SEC = 4.0
+WS_RECONNECT_COOLDOWN_SEC = 10.0
+MAX_EVENT_LOG_COUNT = 30
 
 DEFAULT_SSH_CONFIG = {
     "enabled": False,
@@ -302,6 +305,7 @@ class SymbolState:
     ws_generation_id: int = 0
     mode: str = "DB_ONLY"
     has_db_seed: bool = False
+    db_catchup_targets: Dict[int, Optional[int]] = field(default_factory=dict)
 
 
 class DBReader:
@@ -392,6 +396,43 @@ class DBReader:
         ]
 
 
+class SlidingWindowLimiter:
+    def __init__(self, per_second: int, per_minute: Optional[int] = None) -> None:
+        self.per_second = max(1, per_second)
+        self.per_minute = max(1, per_minute) if per_minute is not None else None
+        self._one_sec: Deque[float] = deque()
+        self._one_min: Deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def _trim(self, now: float) -> None:
+        while self._one_sec and now - self._one_sec[0] >= 1.0:
+            self._one_sec.popleft()
+        while self._one_min and now - self._one_min[0] >= 60.0:
+            self._one_min.popleft()
+
+    def allow(self) -> bool:
+        now = time.time()
+        with self._lock:
+            self._trim(now)
+            if len(self._one_sec) >= self.per_second:
+                return False
+            if self.per_minute is not None and len(self._one_min) >= self.per_minute:
+                return False
+            self._one_sec.append(now)
+            if self.per_minute is not None:
+                self._one_min.append(now)
+            return True
+
+    def stats(self) -> Dict[str, int]:
+        now = time.time()
+        with self._lock:
+            self._trim(now)
+            return {
+                "sec": len(self._one_sec),
+                "min": len(self._one_min),
+            }
+
+
 class TradeFeedWorker(threading.Thread):
     def __init__(
         self,
@@ -411,7 +452,21 @@ class TradeFeedWorker(threading.Thread):
         self.use_mock = use_mock
         self._ws = None
         self._generation_id = 0
+        self._active_generation_id = 0
         self._reconnect_failures = 0
+        self._ws_lock = threading.Lock()
+        self._ws_send_lock = threading.Lock()
+        self._rate_lock = threading.Lock()
+        self._connect_limiter = SlidingWindowLimiter(per_second=5)
+        self._subscribe_limiter = SlidingWindowLimiter(per_second=5, per_minute=100)
+        self._rate_counters: Dict[str, int] = {
+            "connect_attempts": 0,
+            "connect_limited": 0,
+            "subscribe_attempts": 0,
+            "subscribe_limited": 0,
+            "resubscribe_requests": 0,
+            "reconnect_requests": 0,
+        }
 
     def _emit_ws_state(
         self,
@@ -441,6 +496,68 @@ class TradeFeedWorker(threading.Thread):
             delay = max(delay, 30.0)
         return delay
 
+    def _inc_counter(self, key: str, amount: int = 1) -> None:
+        with self._rate_lock:
+            self._rate_counters[key] = self._rate_counters.get(key, 0) + amount
+
+    def _record_connect_attempt(self) -> None:
+        self._inc_counter("connect_attempts", 1)
+
+    def _send_subscribe(self, ws, symbols: List[str], generation_id: int, reason: str) -> bool:
+        if not symbols:
+            return False
+        if not self._subscribe_limiter.allow():
+            self._inc_counter("subscribe_limited", 1)
+            self._emit_ws_state("CONNECTED", "RATE_LIMITED", generation_id=generation_id)
+            return False
+        payload = [
+            {"ticket": f"pcapp-{uuid.uuid4().hex[:8]}"},
+            {"type": "trade", "codes": symbols, "isOnlyRealtime": True},
+        ]
+        self._inc_counter("subscribe_attempts", 1)
+        try:
+            with self._ws_send_lock:
+                ws.send(json.dumps(payload))
+            return True
+        except Exception as exc:
+            self.logger.warning("ws subscribe send failed (%s): %s", reason, exc)
+            return False
+
+    def request_resubscribe(self, symbols: List[str]) -> bool:
+        codes = [s for s in symbols if s in self.symbols]
+        if not codes:
+            return False
+        with self._ws_lock:
+            ws = self._ws
+            generation_id = self._active_generation_id
+        if ws is None:
+            return False
+        self._inc_counter("resubscribe_requests", 1)
+        return self._send_subscribe(ws, codes, generation_id=generation_id, reason="partial_recovery")
+
+    def request_reconnect(self, reason: str) -> bool:
+        with self._ws_lock:
+            ws = self._ws
+        if ws is None:
+            return False
+        self._inc_counter("reconnect_requests", 1)
+        try:
+            ws.close()
+            self.logger.info("ws reconnect requested: %s", reason)
+            return True
+        except Exception as exc:
+            self.logger.warning("ws reconnect request failed: %s", exc)
+            return False
+
+    def get_rate_limit_stats(self) -> Dict[str, int]:
+        with self._rate_lock:
+            counters = dict(self._rate_counters)
+        counters["connect_window_1s"] = self._connect_limiter.stats()["sec"]
+        sub_stats = self._subscribe_limiter.stats()
+        counters["subscribe_window_1s"] = sub_stats["sec"]
+        counters["subscribe_window_1m"] = sub_stats["min"]
+        return counters
+
     def run(self) -> None:
         if self.use_mock:
             self._run_mock()
@@ -456,23 +573,24 @@ class TradeFeedWorker(threading.Thread):
             return
 
         while not self.stop_event.is_set():
+            while not self.stop_event.is_set() and not self._connect_limiter.allow():
+                self._inc_counter("connect_limited", 1)
+                self._emit_ws_state("RECONNECT_WAIT", "RATE_LIMITED", generation_id=self._generation_id, retry_in_sec=0.2)
+                self.stop_event.wait(0.2)
+            if self.stop_event.is_set():
+                break
+
             self._generation_id += 1
             generation_id = self._generation_id
+            self._record_connect_attempt()
             phase = "CONNECTING" if generation_id == 1 else "RECONNECTING"
             self._emit_ws_state(phase, "UNKNOWN", generation_id=generation_id)
 
             def on_open(ws):
                 self._reconnect_failures = 0
+                self._active_generation_id = generation_id
                 self._emit_ws_state("CONNECTED", "ALIVE", generation_id=generation_id)
-                ticket = f"pcapp-{uuid.uuid4().hex[:8]}"
-                payload = [
-                    {"ticket": ticket},
-                    {"type": "trade", "codes": self.symbols, "isOnlyRealtime": True},
-                ]
-                try:
-                    ws.send(json.dumps(payload))
-                except Exception as exc:
-                    self.logger.error("ws send failed: %s", exc)
+                self._send_subscribe(ws, self.symbols, generation_id=generation_id, reason="initial_open")
 
             def on_message(ws, message):
                 try:
@@ -500,9 +618,10 @@ class TradeFeedWorker(threading.Thread):
 
             def on_close(ws, status_code, msg):
                 self.logger.info("ws closed: %s %s", status_code, msg)
+                self._active_generation_id = 0
                 self._emit_ws_state("DISCONNECTED", "UNKNOWN", generation_id=generation_id)
 
-            self._ws = websocket.WebSocketApp(
+            ws_app = websocket.WebSocketApp(
                 "wss://api.upbit.com/websocket/v1",
                 on_open=on_open,
                 on_message=on_message,
@@ -510,12 +629,18 @@ class TradeFeedWorker(threading.Thread):
                 on_pong=on_pong,
                 on_close=on_close,
             )
+            with self._ws_lock:
+                self._ws = ws_app
 
             try:
-                self._ws.run_forever(ping_interval=20, ping_timeout=8)
+                ws_app.run_forever(ping_interval=20, ping_timeout=8)
             except Exception as exc:
                 self.logger.error("ws run failed: %s", exc)
                 self._emit_ws_state("DISCONNECTED", "DEGRADED", generation_id=generation_id)
+            finally:
+                with self._ws_lock:
+                    if self._ws is ws_app:
+                        self._ws = None
 
             if self.stop_event.is_set():
                 break
@@ -548,11 +673,14 @@ class TradeFeedWorker(threading.Thread):
             self.stop_event.wait(0.1)
 
     def stop(self) -> None:
-        if self._ws is not None:
-            try:
-                self._ws.close()
-            except Exception:
-                pass
+        with self._ws_lock:
+            ws = self._ws
+        if ws is None:
+            return
+        try:
+            ws.close()
+        except Exception:
+            pass
 
 
 class MainEngine:
@@ -574,6 +702,12 @@ class MainEngine:
         self._order_loaded_once = False
         self._order_keys: Optional[Dict[str, str]] = None
         self._fatal_message = ""
+        self._last_ack_ts = 0.0
+        self._control_events: Deque[str] = deque(maxlen=MAX_EVENT_LOG_COUNT)
+        self._last_partial_resubscribe_ts = 0.0
+        self._partial_resubscribe_symbols = ""
+        self._partial_resubscribe_deadline_ts = 0.0
+        self._last_reconnect_ts = 0.0
 
         self._ssh_state = {
             "status": "UNCONFIGURED",
@@ -612,6 +746,7 @@ class MainEngine:
                 cutover_by_tf=cutover_by_tf,
                 tick_aggs=tick_aggs,
                 last_trade_wall_ts=now_wall,
+                db_catchup_targets={tf: None for tf in TIMEFRAMES_MS},
             )
 
     def _update_ssh_state(self, status: str, message: str) -> None:
@@ -643,6 +778,39 @@ class MainEngine:
             "last_update_ts": time.time(),
         }
 
+    def _push_control_event(self, message: str) -> None:
+        stamp = time.strftime("%H:%M:%S")
+        self._control_events.appendleft(f"{stamp} | {message}")
+
+    def _require_pageant_policy(self, ssh: Dict[str, Any]) -> Tuple[bool, str]:
+        # 보안상 passphrase를 CLI 인자로 전달할 수 없으므로 Pageant 기반 인증만 허용한다.
+        if not bool(ssh.get("use_pageant", True)):
+            return False, "PAGEANT_REQUIRED"
+        return True, "OK"
+
+    def _normalize_ssh_failure_for_ui(self, msg: str) -> str:
+        text = (msg or "").strip()
+        upper = text.upper()
+        if upper in ("PAGEANT_REQUIRED", "PAGEANT_KEY_REQUIRED", "BUNDLED_PUTTY_MISSING", "PPK_NOT_FOUND"):
+            return upper
+        lowered = text.lower()
+        if "unable to use key file" in lowered or "pageant" in lowered:
+            return "PAGEANT_KEY_REQUIRED"
+        if "plink_not_found" in lowered or "pscp_not_found" in lowered:
+            return "BUNDLED_PUTTY_MISSING"
+        return text
+
+    def _ssh_error_message(self, code: str) -> str:
+        mapping = {
+            "PAGEANT_REQUIRED": "보안상 passphrase CLI 전달은 금지입니다. Pageant 사용이 필요합니다.",
+            "PAGEANT_KEY_REQUIRED": "Pageant에 키가 로드되지 않았습니다.",
+            "BUNDLED_PUTTY_MISSING": "PuTTY 번들(plink/pscp) 누락",
+            "PPK_NOT_FOUND": "PPK 경로 오류",
+            "SSH_TIMEOUT_8S": "SSH TIMEOUT",
+            "SCP_TIMEOUT_8S": "SCP TIMEOUT",
+        }
+        return mapping.get(code, code)
+
     def get_ssh_settings(self) -> Dict[str, Any]:
         return dict(self._get_normalized_ssh_settings())
 
@@ -651,7 +819,8 @@ class MainEngine:
         return max(60, interval)
 
     def set_runtime_passphrase(self, passphrase: Optional[str]) -> None:
-        self._runtime_passphrase = passphrase or None
+        # C-2 정책: passphrase를 명령줄로 전달하지 않으므로 런타임 캐시에 보관하지 않는다.
+        self._runtime_passphrase = None
 
     def apply_ssh_settings(self, settings: Dict[str, Any], passphrase: Optional[str]) -> None:
         normalized = self._normalize_ssh_settings(settings)
@@ -660,11 +829,46 @@ class MainEngine:
             "pull_interval_sec",
             DEFAULT_SNAPSHOT_PULL_INTERVAL_SEC,
         )
-        self._runtime_passphrase = passphrase or None
-        self._update_ssh_state("CONFIGURED", "SSH 설정 적용됨")
+        self._runtime_passphrase = None
+        if passphrase:
+            self._push_control_event("보안 정책으로 passphrase 직접 전달은 비활성화됨(Pageant 필요)")
+            self._update_ssh_state("CONFIGURED", "보안상 passphrase를 명령줄로 전달하지 않습니다. Pageant 키 로드 후 사용하세요.")
+        else:
+            self._update_ssh_state("CONFIGURED", "SSH 설정 적용됨")
 
     def mark_ssh_unavailable(self, reason: str) -> None:
         self._update_ssh_state("FALLBACK", f"SSH 미연결(로컬 DB 사용): {reason}")
+
+    def acknowledge_burst_alert(self) -> None:
+        self._last_ack_ts = time.time()
+        self._push_control_event("BURST 알림 ACK 수신")
+
+    def get_recent_control_events(self, n: int = 5) -> List[str]:
+        return list(self._control_events)[: max(1, n)]
+
+    def get_manual_control_state(self, symbol: str) -> Dict[str, Any]:
+        with self._lock:
+            state = self.states.get(symbol)
+            if state is None:
+                return {
+                    "can_live": False,
+                    "can_db": False,
+                    "can_ack": True,
+                    "reason": "SYMBOL_NOT_FOUND",
+                }
+            db_busy = str(self._db_snapshot_state.get("status", "")) == "RUNNING"
+            reconnecting = state.ws_l1 in ("RECONNECTING", "RECONNECT_WAIT", "CONNECTING")
+            reason = "OK"
+            if db_busy:
+                reason = "DB_SNAPSHOT_RUNNING"
+            elif reconnecting:
+                reason = "WS_RECOVERING"
+            return {
+                "can_live": not db_busy,
+                "can_db": not db_busy and bool(state.has_db_seed),
+                "can_ack": True,
+                "reason": reason,
+            }
 
     def start(self) -> None:
         use_mock = bool(os.getenv("UPBIT_PCAPP_MOCK"))
@@ -745,6 +949,8 @@ class MainEngine:
                     if candles:
                         symbol_has_seed = True
                 state.has_db_seed = symbol_has_seed
+                for tf_ms in TIMEFRAMES_MS:
+                    state.db_catchup_targets[tf_ms] = None
                 state.mode = "DB_ONLY" if symbol_has_seed else "LIVE_ACTIVE"
                 default_tf = self.active_timeframes.get(symbol, self.default_timeframe_ms)
                 merged = self._build_merged_candles(state, default_tf)
@@ -781,7 +987,7 @@ class MainEngine:
 
     def _build_merged_candles(self, state: SymbolState, tf_ms: int) -> List[Candle]:
         db_part = list(state.db_histories[tf_ms])
-        live_part = state.timeframe_aggs[tf_ms].snapshot()
+        live_part = [] if state.mode == "DB_ONLY" else state.timeframe_aggs[tf_ms].snapshot()
         cutover_ts = state.cutover_by_tf.get(tf_ms)
         if cutover_ts is not None:
             db_part = [c for c in db_part if c.ts_ms < cutover_ts]
@@ -791,6 +997,110 @@ class MainEngine:
         if len(merged) > max_store:
             merged = merged[-max_store:]
         return merged
+
+    def _arm_db_catchup_barrier_locked(self, state: SymbolState) -> bool:
+        has_target = False
+        for tf_ms in TIMEFRAMES_MS:
+            live = state.timeframe_aggs[tf_ms].snapshot()
+            target: Optional[int] = None
+            # 현재 진행 중 캔들은 변동 가능성이 있으므로 직전 확정 버킷까지만 DB 동기화 목표로 잡는다.
+            if len(live) >= 2:
+                target = live[-2].ts_ms
+            elif state.db_histories[tf_ms]:
+                target = state.db_histories[tf_ms][-1].ts_ms
+            state.db_catchup_targets[tf_ms] = target
+            if target is not None:
+                has_target = True
+        return has_target
+
+    def _is_db_catchup_ready_locked(self, state: SymbolState) -> bool:
+        for tf_ms in TIMEFRAMES_MS:
+            target = state.db_catchup_targets.get(tf_ms)
+            if target is None:
+                continue
+            history = state.db_histories[tf_ms]
+            if not history:
+                return False
+            if history[-1].ts_ms < target:
+                return False
+        return True
+
+    def _maybe_finalize_db_catchup_locked(self, symbol: str, state: SymbolState) -> None:
+        if state.mode != "LIVE_COOLDOWN":
+            return
+        if not self._is_db_catchup_ready_locked(state):
+            return
+        for tf_ms in TIMEFRAMES_MS:
+            state.db_catchup_targets[tf_ms] = None
+        state.mode = "DB_ONLY"
+        self._push_control_event(f"{symbol} DB catch-up barrier 충족 -> DB_ONLY 복귀")
+
+    def _ws_silent_threshold_sec(self) -> float:
+        return max(WS_SILENT_BASE_SEC, self.no_trade_warn_sec * 4.0)
+
+    def _collect_ws_silence_locked(self) -> Tuple[bool, List[str]]:
+        connected_symbols: List[str] = []
+        silent_symbols: List[str] = []
+        threshold = self._ws_silent_threshold_sec()
+        for symbol, state in self.states.items():
+            if state.ws_l1 != "CONNECTED":
+                continue
+            connected_symbols.append(symbol)
+            age = self._calc_last_trade_age(state)
+            if age >= threshold:
+                silent_symbols.append(symbol)
+        if not connected_symbols:
+            return False, []
+        if silent_symbols and len(silent_symbols) == len(connected_symbols):
+            return True, []
+        return False, sorted(silent_symbols)
+
+    def _maybe_recover_ws_locked(self, global_silent: bool, partial_symbols: List[str]) -> None:
+        if self._worker is None:
+            return
+        now = time.time()
+        if global_silent:
+            if now - self._last_reconnect_ts < WS_RECONNECT_COOLDOWN_SEC:
+                return
+            if self._worker.request_reconnect("GLOBAL_SILENT"):
+                self._last_reconnect_ts = now
+                self._push_control_event("GLOBAL_SILENT 감지 -> WS 재연결 요청")
+            return
+
+        if not partial_symbols:
+            self._partial_resubscribe_symbols = ""
+            self._partial_resubscribe_deadline_ts = 0.0
+            return
+
+        joined = ",".join(partial_symbols)
+        if (
+            now - self._last_partial_resubscribe_ts >= WS_PARTIAL_RESUB_COOLDOWN_SEC
+            and (joined != self._partial_resubscribe_symbols or self._partial_resubscribe_deadline_ts <= 0)
+        ):
+            if self._worker.request_resubscribe(partial_symbols):
+                self._last_partial_resubscribe_ts = now
+                self._partial_resubscribe_symbols = joined
+                self._partial_resubscribe_deadline_ts = now + WS_PARTIAL_RECONNECT_GRACE_SEC
+                self._push_control_event(f"PARTIAL({joined}) 감지 -> 1회 재구독 요청")
+            return
+
+        if (
+            joined == self._partial_resubscribe_symbols
+            and self._partial_resubscribe_deadline_ts > 0
+            and now >= self._partial_resubscribe_deadline_ts
+            and now - self._last_reconnect_ts >= WS_RECONNECT_COOLDOWN_SEC
+        ):
+            if self._worker.request_reconnect(f"PARTIAL_SILENT:{joined}"):
+                self._last_reconnect_ts = now
+                self._partial_resubscribe_deadline_ts = 0.0
+                self._push_control_event(f"PARTIAL({joined}) 지속 -> WS 재연결 요청")
+
+    def _effective_ws_l2_locked(self, symbol: str, state: SymbolState, global_silent: bool, partial_symbols: List[str]) -> str:
+        if global_silent:
+            return "GLOBAL_SILENT"
+        if symbol in partial_symbols:
+            return f"PARTIAL({DISPLAY_NAMES.get(symbol, symbol)})"
+        return state.ws_l2
 
     def _on_ws_state(self, ws_state: Dict[str, Any]) -> None:
         l1 = str(ws_state.get("l1", "DISCONNECTED"))
@@ -823,7 +1133,10 @@ class MainEngine:
                 agg.on_trade(ts_ms, price, volume)
             for agg in state.tick_aggs.values():
                 agg.on_trade(ts_ms, price, volume)
-            state.mode = "LIVE_ACTIVE"
+            if state.mode == "LIVE_COOLDOWN":
+                self._maybe_finalize_db_catchup_locked(symbol, state)
+            elif state.mode != "DB_ONLY":
+                state.mode = "LIVE_ACTIVE"
 
     def set_active_timeframe(self, symbol: str, timeframe_ms: int) -> None:
         if symbol not in self.active_timeframes:
@@ -833,16 +1146,45 @@ class MainEngine:
     def set_symbol_mode(self, symbol: str, mode: str) -> None:
         if symbol not in self.states:
             return
+        normalized_mode = str(mode or "").strip().upper()
+        if normalized_mode not in ("LIVE_ACTIVE", "DB_ONLY", "LIVE_COOLDOWN"):
+            return
         with self._lock:
-            self.states[symbol].mode = mode
+            state = self.states[symbol]
+            if normalized_mode == "LIVE_ACTIVE":
+                for tf_ms in TIMEFRAMES_MS:
+                    state.db_catchup_targets[tf_ms] = None
+                state.mode = "LIVE_ACTIVE"
+                self._push_control_event(f"{symbol} -> LIVE_ACTIVE")
+                return
+
+            if normalized_mode == "LIVE_COOLDOWN":
+                state.mode = "LIVE_COOLDOWN"
+                self._push_control_event(f"{symbol} -> LIVE_COOLDOWN")
+                return
+
+            if not state.has_db_seed:
+                state.mode = "LIVE_ACTIVE"
+                self._push_control_event(f"{symbol} DB 전환 요청 무시(시드 없음)")
+                return
+
+            # LIVE -> DB 복귀 시 DB가 최소 경계까지 따라왔는지 확인하는 barrier를 건다.
+            if self._arm_db_catchup_barrier_locked(state):
+                state.mode = "LIVE_COOLDOWN"
+                self._push_control_event(f"{symbol} DB 전환 요청 -> LIVE_COOLDOWN(barrier 대기)")
+                self._maybe_finalize_db_catchup_locked(symbol, state)
+            else:
+                state.mode = "DB_ONLY"
+                self._push_control_event(f"{symbol} -> DB_ONLY")
 
     def _calc_last_trade_age(self, state: SymbolState) -> float:
         if state.last_trade_wall_ts <= 0:
             return 0.0
         return max(0.0, time.time() - state.last_trade_wall_ts)
 
-    def _calc_ws_status(self, state: SymbolState) -> str:
-        if state.ws_l1 == "CONNECTED" and state.ws_l2 == "ALIVE":
+    def _calc_ws_status(self, state: SymbolState, effective_l2: Optional[str] = None) -> str:
+        l2 = effective_l2 if effective_l2 is not None else state.ws_l2
+        if state.ws_l1 == "CONNECTED" and l2 == "ALIVE":
             return "OK"
         return "WARN"
 
@@ -851,6 +1193,8 @@ class MainEngine:
             state = self.states.get(symbol)
             if state is None:
                 return {}
+            global_silent, partial_symbols = self._collect_ws_silence_locked()
+            self._maybe_recover_ws_locked(global_silent, partial_symbols)
             tf_ms = self.active_timeframes.get(symbol, self.default_timeframe_ms)
             candles = self._build_merged_candles(state, tf_ms)
             last_price = state.last_price
@@ -862,6 +1206,7 @@ class MainEngine:
             if prev_price:
                 percent_change = round(price_change / prev_price * 100, 2)
             last_age = self._calc_last_trade_age(state)
+            ws_l2_effective = self._effective_ws_l2_locked(symbol, state, global_silent, partial_symbols)
             return {
                 "symbol": symbol,
                 "display_name": DISPLAY_NAMES.get(symbol, symbol),
@@ -870,9 +1215,9 @@ class MainEngine:
                 "percent_change": percent_change,
                 "candles": candles,
                 "mode": state.mode,
-                "ws_status": self._calc_ws_status(state),
+                "ws_status": self._calc_ws_status(state, ws_l2_effective),
                 "ws_l1": state.ws_l1,
-                "ws_l2": state.ws_l2,
+                "ws_l2": ws_l2_effective,
                 "burst_status": "NORMAL",
                 "last_message_age": last_age,
                 "last_trade_age_sec": last_age,
@@ -889,6 +1234,8 @@ class MainEngine:
     def get_diagnostics(self) -> Dict[str, Any]:
         with self._lock:
             now_ms = _now_ms()
+            global_silent, partial_symbols = self._collect_ws_silence_locked()
+            self._maybe_recover_ws_locked(global_silent, partial_symbols)
             diag = {
                 "now_ms": now_ms,
                 "symbols": {},
@@ -897,14 +1244,23 @@ class MainEngine:
                 "order": dict(self._order_state),
                 "fatal_message": self._fatal_message,
                 "no_trade_warn_sec": self.no_trade_warn_sec,
+                "ack_ts": self._last_ack_ts,
+                "control_events": self.get_recent_control_events(5),
+                "ws_recovery": {
+                    "global_silent": global_silent,
+                    "partial_symbols": partial_symbols,
+                    "last_partial_resubscribe_ts": self._last_partial_resubscribe_ts,
+                    "last_reconnect_ts": self._last_reconnect_ts,
+                },
             }
             for symbol, state in self.states.items():
                 last_age = self._calc_last_trade_age(state)
+                ws_l2_effective = self._effective_ws_l2_locked(symbol, state, global_silent, partial_symbols)
                 diag["symbols"][symbol] = {
                     "mode": state.mode,
-                    "ws": self._calc_ws_status(state),
+                    "ws": self._calc_ws_status(state, ws_l2_effective),
                     "ws_l1": state.ws_l1,
-                    "ws_l2": state.ws_l2,
+                    "ws_l2": ws_l2_effective,
                     "burst": "NORMAL",
                     "last_trade_ts": state.last_trade_ts,
                     "last_message_age": last_age,
@@ -912,38 +1268,31 @@ class MainEngine:
                     "no_trade_text": f"거래없음 {int(last_age)}초",
                     "generation_id": state.ws_generation_id,
                     "total_ticks": state.total_ticks,
+                    "db_catchup_pending": any(v is not None for v in state.db_catchup_targets.values()),
                 }
-            return diag
+        worker = self._worker
+        if worker is not None:
+            diag["ws_rate_limit"] = worker.get_rate_limit_stats()
+        else:
+            diag["ws_rate_limit"] = {}
+        return diag
 
     def _resolve_putty_binary(self, binary_name: str) -> Optional[str]:
         putty_dir = Path(__file__).resolve().parent / "third_party" / "putty"
         candidate = putty_dir / binary_name
-        if candidate.exists():
+        if candidate.exists() and candidate.is_file():
             return str(candidate)
-        which_names = [binary_name]
-        if binary_name.lower().endswith(".exe"):
-            which_names.append(binary_name[:-4])
-        for name in which_names:
-            resolved = shutil.which(name)
-            if resolved:
-                return resolved
         return None
 
-    def _build_putty_common_args(self, ssh: Dict[str, Any], passphrase: Optional[str]) -> List[str]:
+    def _build_putty_common_args(self, ssh: Dict[str, Any]) -> List[str]:
         args = [
             "-batch",
             "-P",
             str(_safe_int(ssh.get("port"), 22)),
             "-i",
             str(ssh.get("ppk_path", "")),
-            "-timeout",
-            str(SSH_CONNECT_TIMEOUT_SEC),
+            "-agent",
         ]
-        if passphrase:
-            # Pageant 사용이 안 되는 환경에서만 fallback으로 passphrase를 전달한다.
-            args.extend(["-pw", passphrase])
-        elif not bool(ssh.get("use_pageant", True)):
-            args.append("-noagent")
         return args
 
     def _short_error(self, text: str) -> str:
@@ -954,12 +1303,15 @@ class MainEngine:
             return text[:140] + "..."
         return text
 
-    def _run_plink(self, ssh: Dict[str, Any], command: str, passphrase: Optional[str]) -> Tuple[bool, str]:
+    def _run_plink(self, ssh: Dict[str, Any], command: str) -> Tuple[bool, str]:
+        ok, policy_msg = self._require_pageant_policy(ssh)
+        if not ok:
+            return False, policy_msg
         plink = self._resolve_putty_binary("plink.exe")
         if not plink:
-            return False, "PLINK_NOT_FOUND"
+            return False, "BUNDLED_PUTTY_MISSING"
         args = [plink]
-        args.extend(self._build_putty_common_args(ssh, passphrase))
+        args.extend(self._build_putty_common_args(ssh))
         args.extend(["-l", str(ssh.get("username", "")), str(ssh.get("host", "")), command])
         try:
             proc = subprocess.run(
@@ -974,7 +1326,7 @@ class MainEngine:
         except OSError:
             return False, "SSH_EXEC_FAIL"
         if proc.returncode != 0:
-            return False, self._short_error(proc.stderr or proc.stdout)
+            return False, self._normalize_ssh_failure_for_ui(self._short_error(proc.stderr or proc.stdout))
         return True, "OK"
 
     def _run_pscp_download(
@@ -982,13 +1334,15 @@ class MainEngine:
         ssh: Dict[str, Any],
         remote_path: str,
         local_path: Path,
-        passphrase: Optional[str],
     ) -> Tuple[bool, str]:
+        ok, policy_msg = self._require_pageant_policy(ssh)
+        if not ok:
+            return False, policy_msg
         pscp = self._resolve_putty_binary("pscp.exe")
         if not pscp:
-            return False, "PSCP_NOT_FOUND"
+            return False, "BUNDLED_PUTTY_MISSING"
         args = [pscp]
-        args.extend(self._build_putty_common_args(ssh, passphrase))
+        args.extend(self._build_putty_common_args(ssh))
         args.extend([f"{ssh.get('username')}@{ssh.get('host')}:{remote_path}", str(local_path)])
         try:
             proc = subprocess.run(
@@ -1003,7 +1357,7 @@ class MainEngine:
         except OSError:
             return False, "SCP_EXEC_FAIL"
         if proc.returncode != 0:
-            return False, self._short_error(proc.stderr or proc.stdout)
+            return False, self._normalize_ssh_failure_for_ui(self._short_error(proc.stderr or proc.stdout))
         return True, "OK"
 
     def test_ssh_settings(self, settings: Dict[str, Any], passphrase: Optional[str]) -> Tuple[bool, str]:
@@ -1012,10 +1366,18 @@ class MainEngine:
             return False, "SSH_SETTINGS_INCOMPLETE"
         if ssh.get("ppk_path") and not Path(str(ssh["ppk_path"])).exists():
             return False, "PPK_NOT_FOUND"
-        ok, msg = self._run_plink(ssh, "echo SSH_OK", passphrase=passphrase)
+        ok, msg = self._run_plink(ssh, "echo SSH_OK")
         if ok:
             return True, "연결 성공"
-        return False, f"연결 실패: {msg}"
+        if passphrase:
+            self._push_control_event("passphrase 입력은 저장/전달되지 않음(Pageant 필요)")
+        if msg == "PAGEANT_REQUIRED":
+            return False, "보안상 passphrase를 명령줄로 전달하지 않습니다. Pageant 사용을 켜고 키를 로드하세요."
+        if msg == "PAGEANT_KEY_REQUIRED":
+            return False, "Pageant에 키가 로드되지 않았습니다. Pageant에서 키 로드 후 다시 시도하세요."
+        if msg == "BUNDLED_PUTTY_MISSING":
+            return False, "PuTTY 번들(plink/pscp) 누락: pc_app/third_party/putty 확인 필요"
+        return False, f"연결 실패: {self._ssh_error_message(msg)}"
 
     def trigger_periodic_snapshot_pull(self, reason: str = "periodic") -> bool:
         if not self._snapshot_pull_lock.acquire(blocking=False):
@@ -1057,10 +1419,11 @@ class MainEngine:
                 "src_conn.close()"
             )
             remote_cmd = f"python3 -c {shlex.quote(py_code)}"
-            ok, msg = self._run_plink(ssh, remote_cmd, passphrase=self._runtime_passphrase)
+            ok, msg = self._run_plink(ssh, remote_cmd)
             if not ok:
-                self._update_ssh_state("FAILED", f"SSH 실패: {msg}")
-                self._update_db_snapshot_state("FAILED", f"SNAPSHOT_CREATE_FAIL:{msg}")
+                readable = self._ssh_error_message(msg)
+                self._update_ssh_state("FAILED", f"SSH 실패: {readable}")
+                self._update_db_snapshot_state("FAILED", f"SNAPSHOT_CREATE_FAIL:{readable}")
                 return
 
             with NamedTemporaryFile(prefix="ohlcv_snapshot_", suffix=".sqlite.tmp", delete=False) as tmp:
@@ -1070,11 +1433,11 @@ class MainEngine:
                 ssh=ssh,
                 remote_path=str(ssh.get("remote_snapshot_path")),
                 local_path=tmp_path,
-                passphrase=self._runtime_passphrase,
             )
             if not ok:
-                self._update_ssh_state("FAILED", f"SCP 실패: {msg}")
-                self._update_db_snapshot_state("FAILED", f"SNAPSHOT_PULL_FAIL:{msg}")
+                readable = self._ssh_error_message(msg)
+                self._update_ssh_state("FAILED", f"SCP 실패: {readable}")
+                self._update_db_snapshot_state("FAILED", f"SNAPSHOT_PULL_FAIL:{readable}")
                 return
 
             if not self._validate_sqlite_file(tmp_path):
@@ -1121,21 +1484,23 @@ class MainEngine:
         except OSError as exc:
             self.logger.warning("db swap failed: %s", exc)
             return False
-        self._refresh_db_seed_for_db_only_symbols()
+        self._refresh_db_seed_after_snapshot_swap()
         return True
 
-    def _refresh_db_seed_for_db_only_symbols(self) -> None:
+    def _refresh_db_seed_after_snapshot_swap(self) -> None:
         if self.initial_candles <= 0:
             return
         with self._lock:
-            targets = [symbol for symbol, st in self.states.items() if st.mode == "DB_ONLY"]
-            for symbol in targets:
+            # DB swap 이후 DB_ONLY/LIVE_COOLDOWN/LIVE_ACTIVE 모두 최신 cutover 규칙으로 갱신한다.
+            # 특히 LIVE_COOLDOWN은 barrier 판정 근거가 DB history이므로, swap 직후 재평가가 필요하다.
+            for symbol in list(self.states.keys()):
                 state = self.states[symbol]
                 fallback = self.db_reader.load_recent(
                     symbol=symbol,
                     limit=self.initial_candles,
                     timeframe_ms=None,
                 )
+                symbol_has_seed = False
                 for tf_ms in TIMEFRAMES_MS:
                     candles = self.db_reader.load_recent(
                         symbol=symbol,
@@ -1145,6 +1510,10 @@ class MainEngine:
                     if not candles and fallback:
                         candles = fallback
                     self._apply_db_seed_to_timeframe(state, tf_ms, candles)
+                    if candles:
+                        symbol_has_seed = True
+                state.has_db_seed = symbol_has_seed
+                self._maybe_finalize_db_catchup_locked(symbol, state)
 
     def _start_order_gate_load_once(self, reason: str) -> None:
         if self._order_loaded_once:
@@ -1177,10 +1546,9 @@ class MainEngine:
                     ssh=ssh,
                     remote_path=str(ssh.get("remote_config_path")),
                     local_path=tmp_path,
-                    passphrase=self._runtime_passphrase,
                 )
                 if not ok:
-                    self._set_order_state("ORDER_KEYS_ERROR", f"CFG_PULL_FAIL:{msg}", dry_run=True)
+                    self._set_order_state("ORDER_KEYS_ERROR", f"CFG_PULL_FAIL:{self._ssh_error_message(msg)}", dry_run=True)
                     self._order_loaded_once = True
                     return
                 try:

@@ -16,7 +16,12 @@ from pc_app.ui import SshSettingsDialog, Window1, Window2
 
 
 def _apply_geometry(window: QtWidgets.QWidget, geom: Dict[str, int]) -> None:
-    window.setGeometry(geom["x"], geom["y"], geom["width"], geom["height"])
+    # 운영 중 config 드리프트/누락이 발생해도 KeyError로 앱이 죽지 않도록 기본값으로 방어한다.
+    x = int(geom.get("x", 0))
+    y = int(geom.get("y", 0))
+    width = max(400, int(geom.get("width", 1280)))
+    height = max(300, int(geom.get("height", 720)))
+    window.setGeometry(x, y, width, height)
 
 
 def _place_windows(window1: Window1, window2: Window2, config: Dict[str, int]) -> None:
@@ -98,6 +103,7 @@ def main() -> int:
     snapshot_timer.start()
 
     def _on_quit() -> None:
+        snapshot_timer.stop()
         engine.stop()
         config["window_positions"] = {
             "window1": {
